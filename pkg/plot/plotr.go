@@ -1,4 +1,4 @@
-package plotr
+package plot
 
 import (
 	"io"

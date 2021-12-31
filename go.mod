@@ -1,4 +1,4 @@
-module github.com/csweichel/plotr
+module github.com/csweichel/go-plot
 
 go 1.17
 

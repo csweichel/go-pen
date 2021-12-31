@@ -4,15 +4,15 @@ import (
 	"log"
 	"os"
 
-	"github.com/csweichel/plotr/pkg/live"
+	"github.com/csweichel/go-plot/pkg/live"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 )
 
 func main() {
 	app := &cli.App{
-		Name:      "plotr-live",
-		Usage:     "Offer a live-preview of a plotr program",
+		Name:      "go-lot-live",
+		Usage:     "Offer a live-preview of a go-lot program",
 		ArgsUsage: "<filename>",
 		Action: func(c *cli.Context) error {
 			logrus.SetLevel(logrus.DebugLevel)
