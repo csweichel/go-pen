@@ -8,7 +8,7 @@ import (
 )
 
 func NewPNGPlotter() PlotFunc {
-	return func(out io.Writer, p Plot, d Drawing) error {
+	return func(out io.Writer, p Canvas, d Drawing) error {
 		dc := gg.NewContext(p.Size.X, p.Size.Y)
 
 		dc.Clear()
@@ -37,7 +37,7 @@ func NewPNGPlotter() PlotFunc {
 	}
 }
 
-func draw(dc *gg.Context, p Plot, elem Drawable) error {
+func draw(dc *gg.Context, p Canvas, elem Drawable) error {
 	switch e := elem.(type) {
 	case Line:
 		sx, sy := pngConvertXY(p, e.Start)
@@ -57,6 +57,6 @@ func draw(dc *gg.Context, p Plot, elem Drawable) error {
 	return nil
 }
 
-func pngConvertXY(p Plot, xy XY) (float64, float64) {
+func pngConvertXY(p Canvas, xy XY) (float64, float64) {
 	return float64(xy.X), float64(p.Size.Y - xy.Y)
 }

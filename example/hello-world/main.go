@@ -7,10 +7,10 @@ import (
 )
 
 func main() {
-	plot.Run(plot.Plot{
+	plot.Run(plot.Canvas{
 		Size:  plot.A4.Mult(4),
 		Bleed: plot.XY{X: 15, Y: 40},
-	}, func(p plot.Plot, args map[string]string) (d plot.Drawing, err error) {
+	}, func(p plot.Canvas, args map[string]string) (d plot.Drawing, err error) {
 		const c = 50
 		for i := 0; i < c; i++ {
 			angle := (math.Pi / c) * float64(i)

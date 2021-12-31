@@ -8,30 +8,35 @@ import (
 	"github.com/spf13/pflag"
 )
 
-type Plot struct {
+// Canvas describes the canvas on which we'll draw
+type Canvas struct {
 	Size  XY
 	DPI   int
 	Bleed XY
 }
 
-func (p Plot) Middle() XY {
+// Middle returns the middle point of the canvas
+func (p Canvas) Middle() XY {
 	return XY{(p.Size.X - 2*p.Bleed.X) / 2, (p.Size.Y - 2*p.Bleed.Y) / 2}
 }
 
-func (p Plot) Zero() XY {
+// Zero returns the zero point respecting the bleed
+func (p Canvas) Zero() XY {
 	return p.Bleed
 }
 
-func (p Plot) Up() XY {
+// Up returns the upper right corner respecting the bleed
+func (p Canvas) Up() XY {
 	return p.Size.AddXY(p.Bleed.Mult(-1))
 }
 
 // Inner returns the plot size - 2*bleed
-func (p Plot) Inner() XY {
+func (p Canvas) Inner() XY {
 	return XY{p.Size.X - 2*p.Bleed.X, p.Size.Y - 2*p.Bleed.Y}
 }
 
-func (p Plot) Frame() []Drawable {
+// Frame returns a frame around the canvas
+func (p Canvas) Frame() []Drawable {
 	const c = 2
 	return []Drawable{
 		Line{Start: XY{c, c}, End: XY{c, p.Size.Y - c}},
@@ -41,7 +46,8 @@ func (p Plot) Frame() []Drawable {
 	}
 }
 
-func (p Plot) FrameBleed() []Drawable {
+// Frame returns a frame around the canvas respecting the bleed
+func (p Canvas) FrameBleed() []Drawable {
 	var (
 		x = p.Bleed.X
 		y = p.Bleed.Y
@@ -54,22 +60,33 @@ func (p Plot) FrameBleed() []Drawable {
 	}
 }
 
+// XY represents XY coordinates
 type XY struct {
 	X int
 	Y int
 }
 
+// Add adds to the coordinates
 func (xy XY) Add(x, y int) XY {
 	return XY{xy.X + x, xy.Y + y}
 }
+
+// AddF adds floats which are cast to int beforehand
+func (xy XY) AddF(x, y float64) XY {
+	return XY{xy.X + int(x), xy.Y + int(y)}
+}
+
+// AddXY adds another XY pair
 func (xy XY) AddXY(other XY) XY {
 	return XY{xy.X + other.X, xy.Y + other.Y}
 }
 
+// Mult multiplies coordinates
 func (xy XY) Mult(f int) XY {
 	return XY{xy.X * f, xy.Y * f}
 }
 
+// Line is a drawable line
 type Line struct {
 	Start XY
 	End   XY
@@ -77,18 +94,21 @@ type Line struct {
 
 func (Line) mustBeDrawable() {}
 
+// BezierCurve is a drawable bezier curve
 type BezierCurve struct {
 	ControlPoints []XY
 }
 
 func (BezierCurve) mustBeDrawable() {}
 
+// Debug helps debugging other drawables. Use `AsDebug()`.
 type Debug struct {
 	D Drawable
 }
 
 func (Debug) mustBeDrawable() {}
 
+// AsDebug decorates drawables for debugging
 func AsDebug(ds ...Drawable) []Drawable {
 	res := make([]Drawable, 0, len(ds))
 	for _, d := range ds {
@@ -97,6 +117,7 @@ func AsDebug(ds ...Drawable) []Drawable {
 	return res
 }
 
+// Drawable marks all drawable elements
 type Drawable interface {
 	mustBeDrawable()
 }
@@ -106,10 +127,14 @@ var _ Drawable = BezierCurve{}
 
 type Drawing []Drawable
 
-type PlotFunc func(out io.Writer, p Plot, d Drawing) error
-type DrawFunc func(p Plot, args map[string]string) (d Drawing, err error)
+// PlotFunc plots a drawing to some output device
+type PlotFunc func(out io.Writer, p Canvas, d Drawing) error
 
-func Run(p Plot, d DrawFunc) {
+// DrawFunc produces a new drawing
+type DrawFunc func(p Canvas, args map[string]string) (d Drawing, err error)
+
+// Run executes a drawing - use this as entry point for all "sketches"
+func Run(p Canvas, d DrawFunc) {
 	var (
 		device = pflag.String("device", "png", "Output device. Only png is supported for now")
 		output = pflag.StringP("output", "o", "", "path to the output file")
