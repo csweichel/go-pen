@@ -70,13 +70,19 @@ type Line struct {
 	End   XY
 }
 
+func (Line) mustBeDrawable() {}
+
 type BezierCurve struct {
 	ControlPoints []XY
 }
 
+func (BezierCurve) mustBeDrawable() {}
+
 type Debug struct {
 	D Drawable
 }
+
+func (Debug) mustBeDrawable() {}
 
 func AsDebug(ds ...Drawable) []Drawable {
 	res := make([]Drawable, 0, len(ds))
@@ -87,10 +93,11 @@ func AsDebug(ds ...Drawable) []Drawable {
 }
 
 type Drawable interface {
+	mustBeDrawable()
 }
 
-var _ Drawable = &Line{}
-var _ Drawable = &BezierCurve{}
+var _ Drawable = Line{}
+var _ Drawable = BezierCurve{}
 
 type Drawing []Drawable
 
