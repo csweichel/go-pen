@@ -22,6 +22,17 @@ func NewPNGPlotter() PlotFunc {
 			}
 		}
 
+		// enforce bleed
+		dc.SetRGBA(1, 1, 1, 0.8)
+		dc.DrawRectangle(0, 0, float64(p.Size.X), float64(p.Bleed.Y))
+		dc.Fill()
+		dc.DrawRectangle(0, float64(p.Size.Y-p.Bleed.Y), float64(p.Size.X), float64(p.Bleed.Y))
+		dc.Fill()
+		dc.DrawRectangle(0, 0, float64(p.Bleed.X), float64(p.Size.Y))
+		dc.Fill()
+		dc.DrawRectangle(float64(p.Size.X-p.Bleed.X), 0, float64(p.Bleed.X), float64(p.Size.Y))
+		dc.Fill()
+
 		return dc.EncodePNG(out)
 	}
 }

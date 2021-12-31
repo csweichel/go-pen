@@ -26,6 +26,11 @@ func (p Plot) Up() XY {
 	return p.Size.AddXY(p.Bleed.Mult(-1))
 }
 
+// Inner returns the plot size - 2*bleed
+func (p Plot) Inner() XY {
+	return XY{p.Size.X - 2*p.Bleed.X, p.Size.Y - 2*p.Bleed.Y}
+}
+
 func (p Plot) Frame() []Drawable {
 	const c = 2
 	return []Drawable{
