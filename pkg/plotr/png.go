@@ -36,11 +36,12 @@ func draw(dc *gg.Context, p Plot, elem Drawable) error {
 	case BezierCurve:
 		return fmt.Errorf("bezier is not supported yet")
 	case Debug:
-		dc.SetRGB(255, 0, 0)
+		dc.SetRGB(255, 128, 0)
 		defer dc.SetRGB(0, 0, 0)
-		return draw(dc, p, e.Drawable)
+
+		return draw(dc, p, e.D)
 	default:
-		return fmt.Errorf("invalid drawing element")
+		return fmt.Errorf("invalid drawing element: %v", e)
 	}
 	return nil
 }

@@ -75,7 +75,7 @@ type BezierCurve struct {
 }
 
 type Debug struct {
-	Drawable
+	D Drawable
 }
 
 func AsDebug(ds ...Drawable) []Drawable {

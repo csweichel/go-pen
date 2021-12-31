@@ -14,7 +14,7 @@ func main() {
 			})
 		}
 
-		d = append(d, plotr.AsDebug(p.Frame())...)
+		d = append(d, plotr.AsDebug(p.Frame()...)...)
 		d = append(d, p.FrameBleed()...)
 
 		return d, nil
