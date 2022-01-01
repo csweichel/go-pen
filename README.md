@@ -9,6 +9,7 @@ go-pen is a simple generative art framework for pen plotter. It supports
 - [ ] Gcode output
 
 ## Try it out
+[![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#github.com/csweichel/go-pen)
 
 ## Getting started
 ```bash
@@ -17,8 +18,8 @@ go install github.com/csweichel/go-pen/cmd/gopen@latest
 
 # create a new sketch
 mkdir my-sketches
-goplot init my-sketches/hello-world
+gopen init my-sketches/hello-world
 
 # start live-preview
-goplot preview my-sketches/hello-world/main.go
+gopen preview my-sketches/hello-world/main.go
 ```
