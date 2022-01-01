@@ -69,21 +69,6 @@ func initSketch(c *cli.Context) error {
 		return err
 	}
 
-	cmds := [][]string{
-		{"go", "mod", "init", c.String("pkg-name")},
-		{"go", "get", "github.com/csweichel/go-pen"},
-	}
-	for _, c := range cmds {
-		cmd := exec.Command(c[0], c[1:]...)
-		cmd.Dir = fn
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		err = cmd.Run()
-		if err != nil {
-			return err
-		}
-	}
-
 	dl, err := http.Get("https://raw.githubusercontent.com/csweichel/go-pen/main/example/hello-world/main.go")
 	if err != nil {
 		return err
@@ -99,6 +84,21 @@ func initSketch(c *cli.Context) error {
 	_, err = io.Copy(f, dl.Body)
 	if err != nil {
 		return err
+	}
+
+	cmds := [][]string{
+		{"go", "mod", "init", c.String("pkg-name")},
+		{"go", "mod", "tidy"},
+	}
+	for _, c := range cmds {
+		cmd := exec.Command(c[0], c[1:]...)
+		cmd.Dir = fn
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		err = cmd.Run()
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
