@@ -94,6 +94,11 @@ type Line struct {
 
 func (Line) mustBeDrawable() {}
 
+// Offset adds the point to start and end point
+func (l Line) Offset(p XY) Line {
+	return Line{Start: l.Start.AddXY(p), End: l.End.AddXY(p)}
+}
+
 // BezierCurve is a drawable bezier curve
 type BezierCurve struct {
 	ControlPoints []XY
