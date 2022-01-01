@@ -127,7 +127,6 @@ func execute(tmpdir, fn string) (outFN string, err error) {
 	log.WithField("outFN", outFN).Info("executing go-lot program")
 
 	cmd := exec.Command("go", "run", fn, "--output", outFN)
-	cmd.Dir = filepath.Dir(fn)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return outFN, cmd.Run()

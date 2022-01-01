@@ -1,34 +1,105 @@
 package main
 
 import (
-	"log"
+	"io"
+	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 
 	"github.com/csweichel/go-plot/pkg/live"
-	"github.com/sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 )
 
 func main() {
 	app := &cli.App{
-		Name:      "go-lot-live",
-		Usage:     "Offer a live-preview of a go-lot program",
-		ArgsUsage: "<filename>",
-		Action: func(c *cli.Context) error {
-			logrus.SetLevel(logrus.DebugLevel)
+		Name: "goplot",
+		Commands: []*cli.Command{
+			{
+				Name:      "preview",
+				Usage:     "starts a live preview of a go-plot program",
+				ArgsUsage: "<filename>",
+				Action: func(c *cli.Context) error {
+					log.SetLevel(log.DebugLevel)
 
-			fn := c.Args().First()
-			if fn == "" {
-				cli.ShowAppHelpAndExit(c, 128)
-			}
+					fn := c.Args().First()
+					if fn == "" {
+						cli.ShowAppHelpAndExit(c, 128)
+					}
 
-			const addr = "0.0.0.0:9999"
-			return live.Serve(fn, addr)
+					const addr = "0.0.0.0:9999"
+					return live.Serve(fn, addr)
+				},
+			},
+			{
+				Name:      "init",
+				Usage:     "creates a new sketch",
+				ArgsUsage: "<path>",
+				Action:    initSketch,
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:  "pkg-name",
+						Value: "sketch",
+						Usage: "Go package name of the sketch",
+					},
+				},
+			},
 		},
+		Usage: "CLI for working with go-plot",
 	}
 
 	err := app.Run(os.Args)
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func initSketch(c *cli.Context) error {
+	fn := c.Args().First()
+	if fn == "" {
+		cli.ShowAppHelpAndExit(c, 128)
+	}
+	if _, err := os.Stat(fn); err == nil {
+		log.Fatalf("%s exists already", fn)
+	}
+
+	err := os.MkdirAll(fn, 0755)
+	if err != nil {
+		return err
+	}
+
+	cmds := [][]string{
+		{"go", "mod", "init", c.String("pkg-name")},
+		{"go", "get", "github.com/csweichel/go-plot"},
+	}
+	for _, c := range cmds {
+		cmd := exec.Command(c[0], c[1:]...)
+		cmd.Dir = fn
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		err = cmd.Run()
+		if err != nil {
+			return err
+		}
+	}
+
+	dl, err := http.Get("https://raw.githubusercontent.com/csweichel/go-plot/main/example/hello-world/main.go")
+	if err != nil {
+		return err
+	}
+	defer dl.Body.Close()
+
+	f, err := os.OpenFile(filepath.Join(fn, "main.go"), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = io.Copy(f, dl.Body)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

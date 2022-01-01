@@ -1,15 +1,24 @@
-# go-plot
 ![logo](logo.png)
 
-Simple generative art framework for pen plotter
+go-plot is a simple generative art framework for pen plotter. It supports
+- [X] live-reload/preview of plotter programs
+- [X] basic geometries: lines, arcs and bezier curves
+- [X] vector fields, including perlin noise generated ones
+- [X] PNG output
+- [ ] SVG output
+- [ ] Gcode output
 
+## Try it out
 
-### Ideas
-- more basic shapes:
-  - rectangles (built from lines)
-  - circles (built from bezier curves)
-- sampling shapes to lines with a new `Sampleable` interface (`Sample(lineCount int) []Line`)
-- [X] intersecting lines with shapes `Stamp(original []Line, shape func(contains XY) bool) []Line`
-- [X] vector fields
-- CLI
-    - `init` which creates a new sketch
+## Getting started
+```bash
+# install goplot CLI
+go install github.com/csweichel/go-plot/cmd/goplot@latest
+
+# create a new sketch
+mkdir my-sketches
+goplot init my-sketches/hello-world
+
+# start live-preview
+goplot preview my-sketches/hello-world/main.go
+```
