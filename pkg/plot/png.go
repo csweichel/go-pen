@@ -50,8 +50,8 @@ func draw(dc *gg.Context, p Canvas, elem Drawable) error {
 	case BezierCurve:
 		return fmt.Errorf("bezier is not supported yet")
 	case Debug:
-		dc.SetRGB(255, 128, 0)
-		defer dc.SetRGB(0, 0, 0)
+		dc.SetRGBA(0, 0.5, 0, 0.5)
+		defer dc.SetRGBA(0, 0, 0, 1)
 
 		return draw(dc, p, e.D)
 	default:

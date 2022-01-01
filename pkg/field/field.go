@@ -29,9 +29,24 @@ type VectorField struct {
 	Spacing plot.XY
 }
 
-// func (f *VectorField) Nearest(p plot.XY) Vector {
+// Finds the nearest point in the field. If the point is outside the field
+// this function will return nil.
+func (f *VectorField) Nearest(p plot.XY) *Vector {
+	var (
+		x = p.X / f.Spacing.X
+		y = p.Y / f.Spacing.Y
+	)
+	if x < 0 || x >= len(f.Points) {
+		return nil
+	}
 
-// }
+	col := f.Points[x]
+	if y < 0 || y >= len(col) {
+		return nil
+	}
+
+	return &col[y]
+}
 
 // Draw draws the field as a set of lines
 func (field *VectorField) Draw(offset plot.XY) []plot.Drawable {
