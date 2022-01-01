@@ -1,8 +1,6 @@
 package main
 
 import (
-	"math"
-
 	"github.com/csweichel/go-plot/pkg/field"
 	"github.com/csweichel/go-plot/pkg/plot"
 )
@@ -17,18 +15,21 @@ func main() {
 			cy = 40
 		)
 
-		var vs []field.Vector
-		for x := 0; x < cx; x++ {
-			for y := 0; y < cy; y++ {
-				vs = append(vs, field.Vector{
-					P:      p.Zero().Add((p.Inner().X/cx)*x, (p.Inner().Y/cy)*y),
-					Length: 10,
-					Angle:  math.Pi / cy * float64(y),
-				})
-			}
-		}
+		// var vs []field.PointVector
+		// for x := 0; x < cx; x++ {
+		// 	for y := 0; y < cy; y++ {
+		// 		vs = append(vs, field.PointVector{
+		// 			P:      p.Zero().Add((p.Inner().X/cx)*x, (p.Inner().Y/cy)*y),
+		// 			Length: 10,
+		// 			Angle:  math.Pi / cy * float64(y),
+		// 		})
+		// 	}
+		// }
 
-		f := field.NewVectorField(vs)
+		// f := field.NewVectorField(vs)
+		// d = append(d, f.Draw()...)
+
+		f := field.NewPerlinNoiseField(p, plot.XY{X: cx, Y: cy}, 2, 2, 3, 1000)
 		d = append(d, f.Draw()...)
 
 		d = append(d, plot.AsDebug(p.Frame()...)...)
