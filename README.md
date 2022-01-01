@@ -1,6 +1,6 @@
 ![logo](logo.png)
 
-go-plot is a simple generative art framework for pen plotter. It supports
+go-pen is a simple generative art framework for pen plotter. It supports
 - [X] live-reload/preview of plotter programs
 - [X] basic geometries: lines, arcs and bezier curves
 - [X] vector fields, including perlin noise generated ones
@@ -13,7 +13,7 @@ go-plot is a simple generative art framework for pen plotter. It supports
 ## Getting started
 ```bash
 # install goplot CLI
-go install github.com/csweichel/go-plot/cmd/goplot@latest
+go install github.com/csweichel/go-pen/cmd/gopen@latest
 
 # create a new sketch
 mkdir my-sketches

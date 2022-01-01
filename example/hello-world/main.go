@@ -3,7 +3,7 @@ package main
 import (
 	"math"
 
-	"github.com/csweichel/go-plot/pkg/plot"
+	"github.com/csweichel/go-pen/pkg/plot"
 )
 
 func main() {

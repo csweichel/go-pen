@@ -1,4 +1,4 @@
-module github.com/csweichel/go-plot
+module github.com/csweichel/go-pen
 
 go 1.17
 

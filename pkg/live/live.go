@@ -22,12 +22,12 @@ import (
 var index embed.FS
 
 // Serve starts to serve a live-preview of the file from fn at the given addr.
-// fn is expected to be a Go file which uses go-lot.Run
+// fn is expected to be a Go file which uses go-pen.Run
 func Serve(fn string, addr string) error {
 	reload := make(chan string, 1)
 	stop := make(chan struct{})
 
-	tmpdir, err := os.MkdirTemp("", "go-lot-*")
+	tmpdir, err := os.MkdirTemp("", "go-pen-*")
 	if err != nil {
 		return err
 	}
@@ -65,7 +65,7 @@ func Serve(fn string, addr string) error {
 				changed = false
 				res, err := execute(tmpdir, fn)
 				if err != nil {
-					log.WithError(err).Error("cannot execute go-lot program")
+					log.WithError(err).Error("cannot execute go-pen program")
 				}
 				reload <- res
 			case <-stop:
@@ -124,7 +124,7 @@ func serve(l net.Listener, reload <-chan string) {
 
 func execute(tmpdir, fn string) (outFN string, err error) {
 	outFN = filepath.Join(tmpdir, fmt.Sprintf("%d.png", time.Now().UnixMilli()))
-	log.WithField("outFN", outFN).Info("executing go-lot program")
+	log.WithField("outFN", outFN).Info("executing go-pen program")
 
 	cmd := exec.Command("go", "run", fn, "--output", outFN)
 	cmd.Stdout = os.Stdout

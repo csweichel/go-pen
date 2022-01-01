@@ -4,9 +4,9 @@ import (
 	"math"
 	"math/rand"
 
-	"github.com/csweichel/go-plot/pkg/clip"
-	"github.com/csweichel/go-plot/pkg/field"
-	"github.com/csweichel/go-plot/pkg/plot"
+	"github.com/csweichel/go-pen/pkg/clip"
+	"github.com/csweichel/go-pen/pkg/field"
+	"github.com/csweichel/go-pen/pkg/plot"
 )
 
 func main() {

@@ -7,18 +7,18 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/csweichel/go-plot/pkg/live"
+	"github.com/csweichel/go-pen/pkg/live"
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 )
 
 func main() {
 	app := &cli.App{
-		Name: "goplot",
+		Name: "gopen",
 		Commands: []*cli.Command{
 			{
 				Name:      "preview",
-				Usage:     "starts a live preview of a go-plot program",
+				Usage:     "starts a live preview of a go-pen program",
 				ArgsUsage: "<filename>",
 				Action: func(c *cli.Context) error {
 					log.SetLevel(log.DebugLevel)
@@ -46,7 +46,7 @@ func main() {
 				},
 			},
 		},
-		Usage: "CLI for working with go-plot",
+		Usage: "CLI for working with go-pen",
 	}
 
 	err := app.Run(os.Args)
@@ -71,7 +71,7 @@ func initSketch(c *cli.Context) error {
 
 	cmds := [][]string{
 		{"go", "mod", "init", c.String("pkg-name")},
-		{"go", "get", "github.com/csweichel/go-plot"},
+		{"go", "get", "github.com/csweichel/go-pen"},
 	}
 	for _, c := range cmds {
 		cmd := exec.Command(c[0], c[1:]...)
@@ -84,7 +84,7 @@ func initSketch(c *cli.Context) error {
 		}
 	}
 
-	dl, err := http.Get("https://raw.githubusercontent.com/csweichel/go-plot/main/example/hello-world/main.go")
+	dl, err := http.Get("https://raw.githubusercontent.com/csweichel/go-pen/main/example/hello-world/main.go")
 	if err != nil {
 		return err
 	}

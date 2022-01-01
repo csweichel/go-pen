@@ -1,7 +1,7 @@
 package clip
 
 import (
-	"github.com/csweichel/go-plot/pkg/plot"
+	"github.com/csweichel/go-pen/pkg/plot"
 	"github.com/ctessum/geom"
 )
 

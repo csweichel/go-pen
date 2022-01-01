@@ -1,6 +1,6 @@
 # List the start up tasks. Learn more https://www.gitpod.io/docs/config-start-tasks/
 tasks:
-  - command: go run cmd/goplot/main.go -- $PWD/example/hello-world/main.go 
+  - command: go run cmd/gopen/main.go -- preview example/hello-world/main.go 
 
 # List the ports to expose. Learn more https://www.gitpod.io/docs/config-ports/
 ports:
