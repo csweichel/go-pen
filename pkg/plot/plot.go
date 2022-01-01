@@ -108,6 +108,14 @@ type Debug struct {
 
 func (Debug) mustBeDrawable() {}
 
+// Arc draws an arc
+type Arc struct {
+	P      XY
+	Radius int
+}
+
+func (Arc) mustBeDrawable() {}
+
 // AsDebug decorates drawables for debugging
 func AsDebug(ds ...Drawable) []Drawable {
 	res := make([]Drawable, 0, len(ds))

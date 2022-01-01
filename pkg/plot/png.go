@@ -44,6 +44,9 @@ func draw(dc *gg.Context, p Canvas, elem Drawable) error {
 		ex, ey := pngConvertXY(p, e.End)
 		dc.DrawLine(sx, sy, ex, ey)
 		dc.Stroke()
+	case Arc:
+		dc.DrawArc(float64(e.P.X), float64(e.P.Y), float64(e.Radius), 0, 0)
+		dc.Stroke()
 	case BezierCurve:
 		return fmt.Errorf("bezier is not supported yet")
 	case Debug:
