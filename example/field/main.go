@@ -19,14 +19,14 @@ func main() {
 		d = append(d, plot.AsDebug(f.Draw(p.Bleed)...)...)
 
 		rand.Seed(4589)
-		for i := 0; i < 500; i++ {
+		for i := 0; i < 5000; i++ {
 			s := plot.XY{X: rand.Intn(p.Size.X), Y: rand.Intn(p.Size.Y)}
-			d = append(d, traceLine(p, f, s, 10, 100)...)
+			d = append(d, traceLine(p, f, s, 10, 10)...)
 		}
 		rand.Seed(189)
 		for i := 0; i < 500; i++ {
 			s := plot.XY{X: rand.Intn(p.Size.X), Y: rand.Intn(p.Size.Y)}
-			d = append(d, traceLine(p, f, s, 10, 100)...)
+			d = append(d, traceLine(p, f, s, 10, 10)...)
 		}
 
 		d = append(d, plot.AsDebug(p.Frame()...)...)
