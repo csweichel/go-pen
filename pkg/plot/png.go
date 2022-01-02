@@ -16,7 +16,7 @@ func NewPNGPlotter() PlotFunc {
 		dc.SetLineWidth(1)
 
 		for _, elem := range d {
-			err := draw(dc, p, elem)
+			err := drawPNG(dc, p, elem)
 			if err != nil {
 				return err
 			}
@@ -37,7 +37,7 @@ func NewPNGPlotter() PlotFunc {
 	}
 }
 
-func draw(dc *gg.Context, p Canvas, elem Drawable) error {
+func drawPNG(dc *gg.Context, p Canvas, elem Drawable) error {
 	switch e := elem.(type) {
 	case Line:
 		sx, sy := pngConvertXY(p, e.Start)
@@ -53,7 +53,7 @@ func draw(dc *gg.Context, p Canvas, elem Drawable) error {
 		dc.SetRGBA(0, 0.5, 0, 0.5)
 		defer dc.SetRGBA(0, 0, 0, 1)
 
-		return draw(dc, p, e.D)
+		return drawPNG(dc, p, e.D)
 	default:
 		return fmt.Errorf("invalid drawing element: %v", e)
 	}

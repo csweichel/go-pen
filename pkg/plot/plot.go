@@ -1,6 +1,7 @@
 package plot
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 
@@ -149,14 +150,25 @@ type DrawFunc func(p Canvas, args map[string]string) (d Drawing, err error)
 // Run executes a drawing - use this as entry point for all "sketches"
 func Run(p Canvas, d DrawFunc) {
 	var (
-		device = pflag.String("device", "png", "Output device. Only png is supported for now")
-		output = pflag.StringP("output", "o", "", "path to the output file")
-		args   = pflag.StringToString("args", nil, "args to pass to the drawing")
+		device       = pflag.String("device", "png", "Output device. Must be png or gcode")
+		deviceOptsFN = pflag.String("device-opts", "", "Path to the output device option file")
+		output       = pflag.StringP("output", "o", "", "path to the output file")
+		args         = pflag.StringToString("args", nil, "args to pass to the drawing")
 	)
 	pflag.Parse()
 
+	var out io.Writer
 	if *output == "" {
 		log.Fatal("missing --output")
+	} else if *output == "-" {
+		out = os.Stdout
+	} else {
+		f, err := os.OpenFile(*output, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+		if err != nil {
+			log.WithError(err).Fatal("cannot open output file")
+		}
+		defer f.Close()
+		out = f
 	}
 
 	drawing, err := d(p, *args)
@@ -168,18 +180,56 @@ func Run(p Canvas, d DrawFunc) {
 	switch *device {
 	case "png":
 		plot = NewPNGPlotter()
+	case "gcode":
+		plot, err = NewGCodePlotter(*deviceOptsFN)
+	case "json":
+		plot = JsonPlotter
 	default:
 		log.Fatalf("Unsupported device: %s", device)
 	}
-
-	f, err := os.OpenFile(*output, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
-		log.WithError(err).Fatal("cannot open output file")
+		log.WithError(err).Fatal("cannot produce output device")
 	}
-	defer f.Close()
 
-	err = plot(f, p, drawing)
+	err = plot(out, p, drawing)
 	if err != nil {
 		log.WithError(err).Fatal("failed to plot drawing")
 	}
+}
+
+func JsonPlotter(out io.Writer, p Canvas, d Drawing) error {
+	type env struct {
+		Type string   `json:"type"`
+		D    Drawable `json:"obj"`
+	}
+	type plot struct {
+		C        Canvas `json:"canvas"`
+		Elements []env  `json:"elements"`
+	}
+
+	var res plot
+	res.C = p
+	res.Elements = make([]env, len(d))
+	for i, de := range d {
+		var tpe string
+		switch de.(type) {
+		case Line:
+			tpe = "line"
+		case BezierCurve:
+			tpe = "bezier"
+		case Debug:
+			tpe = "debug"
+		case Arc:
+			tpe = "arc"
+		}
+
+		res.Elements[i] = env{
+			Type: tpe,
+			D:    de,
+		}
+	}
+
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+	return enc.Encode(res)
 }

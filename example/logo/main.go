@@ -1,7 +1,6 @@
 package main
 
 import (
-	"math"
 	"math/rand"
 
 	"github.com/csweichel/go-pen/pkg/clip"
@@ -21,7 +20,7 @@ func main() {
 		rand.Seed(4589)
 		for i := 0; i < 1000; i++ {
 			s := plot.XY{X: rand.Intn(p.Size.X), Y: rand.Intn(p.Size.Y)}
-			fl = append(fl, traceLine(p, f, s, 10, 10)...)
+			fl = append(fl, field.TraceLine(p, f, s, 10, 10)...)
 		}
 
 		c := 3
@@ -42,23 +41,4 @@ func main() {
 
 		return d, nil
 	})
-}
-
-func traceLine(p plot.Canvas, field *field.VectorField, start plot.XY, len, steps int) (r []plot.Line) {
-	if steps <= 0 {
-		return
-	}
-	nearest := field.Nearest(start)
-	if nearest == nil {
-		return
-	}
-
-	angle := nearest.Angle
-	end := start.Add(int(float64(len)*math.Cos(angle)), int(float64(len)*math.Sin(angle)))
-	r = append(r, plot.Line{
-		Start: start.AddXY(p.Bleed),
-		End:   end.AddXY(p.Bleed),
-	})
-	r = append(r, traceLine(p, field, end, len, steps-1)...)
-	return
 }

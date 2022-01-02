@@ -91,3 +91,24 @@ func NewPerlinNoiseField(p plot.Canvas, counts plot.XY, alpha, beta float64, n i
 		}
 	})
 }
+
+// TraceLine traces a line from the starting point following the angles of the nearest points until
+// we've reached "steps" line count.s
+func TraceLine(p plot.Canvas, field *VectorField, start plot.XY, len, steps int) (r []plot.Line) {
+	if steps <= 0 {
+		return
+	}
+	nearest := field.Nearest(start)
+	if nearest == nil {
+		return
+	}
+
+	angle := nearest.Angle
+	end := start.Add(int(float64(len)*math.Cos(angle)), int(float64(len)*math.Sin(angle)))
+	r = append(r, TraceLine(p, field, end, len, steps-1)...)
+	r = append(r, plot.Line{
+		Start: start.AddXY(p.Bleed),
+		End:   end.AddXY(p.Bleed),
+	})
+	return
+}
