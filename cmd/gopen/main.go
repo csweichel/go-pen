@@ -29,7 +29,7 @@ func main() {
 					}
 
 					const addr = "0.0.0.0:9999"
-					return live.Serve(fn, addr)
+					return live.Serve(fn, addr, c.Args().Tail())
 				},
 			},
 			{

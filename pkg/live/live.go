@@ -23,7 +23,7 @@ var index embed.FS
 
 // Serve starts to serve a live-preview of the file from fn at the given addr.
 // fn is expected to be a Go file which uses go-pen.Run
-func Serve(fn string, addr string) error {
+func Serve(fn string, addr string, customArgs []string) error {
 	reload := make(chan string, 1)
 	stop := make(chan struct{})
 
@@ -32,7 +32,7 @@ func Serve(fn string, addr string) error {
 		return err
 	}
 
-	out, err := execute(tmpdir, fn)
+	out, err := execute(tmpdir, fn, customArgs)
 	if err != nil {
 		return err
 	}
@@ -63,7 +63,7 @@ func Serve(fn string, addr string) error {
 					continue
 				}
 				changed = false
-				res, err := execute(tmpdir, fn)
+				res, err := execute(tmpdir, fn, customArgs)
 				if err != nil {
 					log.WithError(err).Error("cannot execute go-pen program")
 				}
@@ -122,9 +122,8 @@ func serve(l net.Listener, reload <-chan string) {
 	http.Serve(l, mux)
 }
 
-func execute(tmpdir, fn string) (outFN string, err error) {
+func execute(tmpdir, fn string, customArgs []string) (outFN string, err error) {
 	outFN = filepath.Join(tmpdir, fmt.Sprintf("%d.png", time.Now().UnixMilli()))
-	log.WithField("outFN", outFN).Info("executing go-pen program")
 
 	var dir, base string
 	if stat, err := os.Stat(fn); err != nil {
@@ -137,7 +136,13 @@ func execute(tmpdir, fn string) (outFN string, err error) {
 		base = filepath.Base(fn)
 	}
 
-	cmd := exec.Command("go", "run", base, "--output", outFN)
+	var args []string
+	args = append(args, "run", base, "--output", outFN)
+	args = append(args, customArgs...)
+
+	log.WithField("outFN", outFN).WithField("args", args).Info("executing go-pen program")
+
+	cmd := exec.Command("go", args...)
 	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

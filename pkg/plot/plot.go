@@ -2,6 +2,7 @@ package plot
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 
@@ -154,6 +155,7 @@ func Run(p Canvas, d DrawFunc) {
 		deviceOptsFN = pflag.String("device-opts", "", "Path to the output device option file")
 		output       = pflag.StringP("output", "o", "", "path to the output file")
 		args         = pflag.StringToString("args", nil, "args to pass to the drawing")
+		optimisation = pflag.StringSliceP("optimise", "L", nil, "Configures optimisations. Available optimisations are llo (linear line order)")
 	)
 	pflag.Parse()
 
@@ -176,11 +178,16 @@ func Run(p Canvas, d DrawFunc) {
 		log.WithError(err).Fatal("drawing failed")
 	}
 
-	optimisations := []OptimisationFunc{
-		OptimiseLinearLineOrder,
-	}
-	for _, opt := range optimisations {
-		drawing, err = opt(p, drawing)
+	for _, opt := range *optimisation {
+		var optf OptimisationFunc
+		switch opt {
+		case "llo":
+			optf = OptimiseLinearLineOrder
+		default:
+			log.Fatal(fmt.Errorf("unknown optimisation: %s", opt))
+		}
+
+		drawing, err = optf(p, drawing)
 		if err != nil {
 			log.WithError(err).Warn("optimisation failed")
 		}
