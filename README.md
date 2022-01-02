@@ -1,4 +1,5 @@
 ![logo](logo.png)
+<img src="logo.jpeg" style="width: 300px" />
 
 go-pen is a simple generative art framework for pen plotter. It supports
 - [X] live-reload/preview of plotter programs
