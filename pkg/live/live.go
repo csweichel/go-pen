@@ -126,7 +126,19 @@ func execute(tmpdir, fn string) (outFN string, err error) {
 	outFN = filepath.Join(tmpdir, fmt.Sprintf("%d.png", time.Now().UnixMilli()))
 	log.WithField("outFN", outFN).Info("executing go-pen program")
 
-	cmd := exec.Command("go", "run", fn, "--output", outFN)
+	var dir, base string
+	if stat, err := os.Stat(fn); err != nil {
+		return "", err
+	} else if stat.IsDir() {
+		dir = fn
+		base = "main.go"
+	} else {
+		dir = filepath.Dir(fn)
+		base = filepath.Base(fn)
+	}
+
+	cmd := exec.Command("go", "run", base, "--output", outFN)
+	cmd.Dir = dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return outFN, cmd.Run()
