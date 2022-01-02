@@ -43,7 +43,7 @@ func (p Canvas) Frame() []Drawable {
 		Line{Start: XY{c, c}, End: XY{c, p.Size.Y - c}},
 		Line{Start: XY{c, p.Size.Y - c}, End: XY{p.Size.X - c, p.Size.Y - c}},
 		Line{Start: XY{p.Size.X - c, p.Size.Y - c}, End: XY{p.Size.X - c, c}},
-		Line{Start: XY{p.Size.X - c, c}, End: XY{c, c}},
+		Line{Start: XY{p.Size.X - c, c}, End: XY{c, c - 1}},
 	}
 }
 
@@ -57,7 +57,7 @@ func (p Canvas) FrameBleed() []Drawable {
 		Line{Start: XY{x, y}, End: XY{x, p.Size.Y - y}},
 		Line{Start: XY{x, p.Size.Y - y}, End: XY{p.Size.X - x, p.Size.Y - y}},
 		Line{Start: XY{p.Size.X - x, p.Size.Y - y}, End: XY{p.Size.X - x, y}},
-		Line{Start: XY{p.Size.X - x, y}, End: XY{x, y}},
+		Line{Start: XY{p.Size.X - x, y}, End: XY{x, y - 1}},
 	}
 }
 

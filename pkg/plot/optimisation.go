@@ -14,7 +14,8 @@ func OptimiseLinearLineOrder(p Canvas, d Drawing) (Drawing, error) {
 
 	var res = make([]Drawable, 0, len(d))
 
-	// Start with all source nodes and go depth-first until we're at the end of the path, or find a node we've seen before
+	// Start with all source nodes and go depth-first until we're at the end of the path, or find a node we've seen before.
+	// We start with source nodes only to ensure we get the longest possible paths.
 	nodes := g.Nodes()
 	var dfs traverse.DepthFirst
 	dfs.Visit = func(n graph.Node) {
@@ -29,6 +30,8 @@ func OptimiseLinearLineOrder(p Canvas, d Drawing) (Drawing, error) {
 
 		dfs.Walk(g, n, nil)
 	}
+
+	// TODO(cw): this approach "swallows" circles in the graph
 
 	res = append(res, residual...)
 	return res, nil

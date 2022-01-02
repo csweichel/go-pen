@@ -9,15 +9,18 @@ import (
 
 type GCodeOpts struct {
 	DrawFeed   int     `json:"drawFeed"`
+	DrawLift   int     `json:"drawLift"`
 	TravelFeed int     `json:"travelFeed"`
 	TravelLift int     `json:"travelLift"`
 	Scale      float64 `json:"scale"`
+	Offset     XY      `json:"offset"`
 }
 
 func NewDefaultGCodeOpts() *GCodeOpts {
 	return &GCodeOpts{
-		DrawFeed:   100,
-		TravelFeed: 1000,
+		DrawFeed:   1500,
+		DrawLift:   0,
+		TravelFeed: 4000,
 		TravelLift: 3,
 		Scale:      0.1,
 	}
@@ -40,7 +43,7 @@ func NewGCodePlotter(optFN string) (PlotFunc, error) {
 
 	var (
 		up    GCodeCommand = GCodeLift{Height: opts.TravelLift, Feedrate: opts.TravelFeed}
-		down  GCodeCommand = GCodeLift{Height: 0, Feedrate: opts.TravelFeed}
+		down  GCodeCommand = GCodeLift{Height: opts.DrawLift, Feedrate: opts.TravelFeed}
 		state gcodeState
 	)
 
@@ -48,22 +51,26 @@ func NewGCodePlotter(optFN string) (PlotFunc, error) {
 	draw = func(w io.Writer, p Canvas, elem Drawable) (res []GCodeCommand, err error) {
 		switch e := elem.(type) {
 		case Line:
-			if state.Pos != e.Start {
+			var (
+				start = e.Start.AddXY(opts.Offset)
+				end   = e.End.AddXY(opts.Offset)
+			)
+			if state.Pos != start {
 				res = append(res,
 					up,
 					GCodeLinearMoveXY{
-						P:        e.Start,
+						P:        start,
 						Feedrate: opts.DrawFeed,
 						Scale:    opts.Scale,
 					},
 					down,
 				)
 			}
-			if state.Height != 0 {
+			if state.Height != opts.DrawLift {
 				res = append(res, down)
 			}
 			res = append(res, GCodeLinearMoveXY{
-				P:        e.End,
+				P:        end,
 				Feedrate: opts.DrawFeed,
 				Scale:    opts.Scale,
 			})

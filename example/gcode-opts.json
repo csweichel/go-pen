@@ -1,3 +1,5 @@
 {
-    "scale": 0.25
+    "scale": 0.3,
+    "drawLift": 1,
+    "offset": {"X":10, "Y":10}
 }
