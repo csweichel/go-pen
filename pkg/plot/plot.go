@@ -176,6 +176,16 @@ func Run(p Canvas, d DrawFunc) {
 		log.WithError(err).Fatal("drawing failed")
 	}
 
+	optimisations := []OptimisationFunc{
+		OptimiseLinearLineOrder,
+	}
+	for _, opt := range optimisations {
+		drawing, err = opt(p, drawing)
+		if err != nil {
+			log.WithError(err).Warn("optimisation failed")
+		}
+	}
+
 	var plot PlotFunc
 	switch *device {
 	case "png":
