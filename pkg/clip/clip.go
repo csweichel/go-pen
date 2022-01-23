@@ -1,6 +1,8 @@
 package clip
 
 import (
+	"sync"
+
 	"github.com/csweichel/go-pen/pkg/plot"
 	"github.com/ctessum/geom"
 )
@@ -39,24 +41,50 @@ func ClipLines(lines []plot.Line, mask []plot.XY) []plot.Line {
 	}
 	poly := geom.Polygon{polyp}
 
-	ls := make([]plot.Line, 0, len(lines))
-	for _, l := range lines {
-		line := geom.LineString{
-			geom.Point{X: float64(l.Start.X), Y: float64(l.Start.Y)},
-			geom.Point{X: float64(l.End.X), Y: float64(l.End.Y)},
-		}
-		res := line.Clip(poly)
-		if res.Len() != 2 {
-			continue
-		}
-		pts := res.Points()
-		start := pts()
-		end := pts()
-
-		ls = append(ls, plot.Line{
-			Start: plot.XY{X: int(start.X), Y: int(start.Y)},
-			End:   plot.XY{X: int(end.X), Y: int(end.Y)},
-		})
+	var (
+		in  = make(chan plot.Line)
+		out = make(chan plot.Line)
+		wg  sync.WaitGroup
+	)
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for l := range in {
+				line := geom.LineString{
+					geom.Point{X: float64(l.Start.X), Y: float64(l.Start.Y)},
+					geom.Point{X: float64(l.End.X), Y: float64(l.End.Y)},
+				}
+				res := line.Clip(poly)
+				if res.Len() != 2 {
+					continue
+				}
+				pts := res.Points()
+				start := pts()
+				end := pts()
+				out <- plot.Line{
+					Start: plot.XY{X: int(start.X), Y: int(start.Y)},
+					End:   plot.XY{X: int(end.X), Y: int(end.Y)},
+				}
+			}
+		}()
 	}
+
+	go func() {
+		defer wg.Wait()
+		for _, l := range lines {
+			in <- l
+		}
+		close(in)
+		wg.Wait()
+
+		close(out)
+	}()
+
+	ls := make([]plot.Line, 0, len(lines))
+	for l := range out {
+		ls = append(ls, l)
+	}
+
 	return ls
 }
