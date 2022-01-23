@@ -1,4 +1,4 @@
-# List the start up tasks. Learn more https://www.gitpod.io/docs/config-start-tasks/
+
 tasks:
   - command: go run cmd/gopen/main.go -- preview example/hello-world/main.go 
 
@@ -6,3 +6,7 @@ tasks:
 ports:
   - port: 9999
     onOpen: open-preview
+
+vscode:
+  extensions:
+    - golang.go
