@@ -19,7 +19,7 @@ type Canvas struct {
 
 // Middle returns the middle point of the canvas
 func (p Canvas) Middle() XY {
-	return XY{(p.Size.X - 2*p.Bleed.X) / 2, (p.Size.Y - 2*p.Bleed.Y) / 2}
+	return XY{X: p.Size.X / 2, Y: p.Size.Y / 2}
 }
 
 // Zero returns the zero point respecting the bleed
@@ -88,6 +88,16 @@ func (xy XY) Mult(f int) XY {
 	return XY{xy.X * f, xy.Y * f}
 }
 
+// Div divides coordinates
+func (xy XY) Div(f int) XY {
+	return XY{xy.X / f, xy.Y / f}
+}
+
+// IsZero returns true if the XY is the zero value
+func (xy XY) IsZero() bool {
+	return xy.X == 0 && xy.Y == 0
+}
+
 // Line is a drawable line
 type Line struct {
 	Start XY
@@ -128,6 +138,15 @@ func AsDebug(ds ...Drawable) []Drawable {
 	res := make([]Drawable, 0, len(ds))
 	for _, d := range ds {
 		res = append(res, Debug{d})
+	}
+	return res
+}
+
+// AsDrawable convers lines to drawables
+func AsDrawable(ls ...Line) []Drawable {
+	res := make([]Drawable, 0, len(ls))
+	for _, l := range ls {
+		res = append(res, l)
 	}
 	return res
 }
