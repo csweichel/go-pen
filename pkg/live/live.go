@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -330,7 +331,18 @@ func (s *server) serveHTTP(l net.Listener) {
 }
 
 func execute(ctx context.Context, tmpdir, fn string, customArgs []string) (outFN string, err error) {
-	outFN = filepath.Join(tmpdir, fmt.Sprintf("%d.png", time.Now().UnixMilli()))
+	useSVG := true
+	for _, a := range customArgs {
+		if a == "--device" || strings.HasPrefix(a, "--device=") {
+			useSVG = false
+			break
+		}
+	}
+	ext := "png"
+	if useSVG {
+		ext = "svg"
+	}
+	outFN = filepath.Join(tmpdir, fmt.Sprintf("%d.%s", time.Now().UnixMilli(), ext))
 
 	var dir, base string
 	if stat, err := os.Stat(fn); err != nil {
@@ -345,6 +357,9 @@ func execute(ctx context.Context, tmpdir, fn string, customArgs []string) (outFN
 
 	var args []string
 	args = append(args, "run", base, "--output", outFN)
+	if useSVG {
+		args = append(args, "--device", "svg")
+	}
 	args = append(args, customArgs...)
 
 	log.WithField("outFN", outFN).WithField("args", args).Info("executing go-pen program")

@@ -16,7 +16,7 @@ func NewSVGPlotter() PlotFunc {
 		b.WriteString(fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">
 <rect width="100%%" height="100%%" fill="white"/>
-<g stroke="black" stroke-width="1" fill="none">
+<g stroke="black" stroke-width="1" fill="none" stroke-linecap="round" stroke-linejoin="round">
 `, w, h, w, h))
 
 		for _, elem := range d {
