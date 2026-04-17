@@ -13,7 +13,7 @@
       .controls label { font-size: 13px; color: #999; }
       .controls input[type=range] { width: 120px; }
       #status { font-size: 12px; padding: 2px 8px; border-radius: 3px; }
-      .status-ok { background: #1a3a1a; color: #4ade80; }
+      .status-ready { background: #1a3a1a; color: #4ade80; }
       .status-building { background: #3a3a1a; color: #facc15; }
       .status-error { background: #3a1a1a; color: #f87171; }
       .hidden { display: none; }
@@ -27,9 +27,10 @@
       <h1>go-pen</h1>
       <select id="sketch" class="hidden"></select>
       <div class="controls">
-        <span id="status" class="status-building">building…</span>
+        <span id="status" class="status-building">connecting…</span>
         <label>zoom</label>
-        <input type="range" min="10" max="200" value="100" id="zoom" oninput="document.getElementById('image').style.transform='scale('+this.value/100+')'">
+        <input type="range" min="10" max="200" value="100" id="zoom"
+          oninput="document.getElementById('image').style.transform='scale('+this.value/100+')'">
       </div>
     </header>
     <main>
@@ -37,76 +38,114 @@
       <div id="error"></div>
     </main>
 
-    <script src="https://cdn.socket.io/socket.io-1.2.0.js"></script>
     <script>
-      var socket = io("/");
-      var sketchSelect = document.getElementById("sketch");
       var image = document.getElementById("image");
       var errorDiv = document.getElementById("error");
-      var status = document.getElementById("status");
+      var statusEl = document.getElementById("status");
+      var sketchSelect = document.getElementById("sketch");
+      var galleryMode = false;
 
       function setStatus(text, cls) {
-        status.textContent = text;
-        status.className = cls;
+        statusEl.textContent = text;
+        statusEl.className = cls;
       }
 
-      socket.on("connect", function() {
-        // Check if server is in gallery mode
-        fetch("/api/sketches").then(function(r) {
-          if (!r.ok) return null;
-          return r.json();
-        }).then(function(sketches) {
-          if (!sketches || sketches.length === 0) return;
-
-          // Gallery mode: show the picker
-          sketchSelect.classList.remove("hidden");
-          sketchSelect.innerHTML = "";
-          sketches.forEach(function(s) {
-            var opt = document.createElement("option");
-            opt.value = s;
-            opt.textContent = s;
-            sketchSelect.appendChild(opt);
-          });
-
-          var last = localStorage.getItem("go-pen-sketch");
-          if (last && sketches.indexOf(last) >= 0) {
-            sketchSelect.value = last;
-          }
-          selectSketch(sketchSelect.value);
-        }).catch(function() {
-          // Single-file mode: no picker needed
-        });
-      });
-
-      sketchSelect.addEventListener("change", function() {
-        selectSketch(this.value);
-      });
-
-      function selectSketch(name) {
-        if (!name) return;
-        localStorage.setItem("go-pen-sketch", name);
-        setStatus("building…", "status-building");
-        image.style.display = "none";
-        errorDiv.style.display = "none";
-        socket.emit("select", name);
-      }
-
-      socket.on("reload", function(filename) {
-        setStatus("ready", "status-ok");
-        image.src = "/out/" + filename + "?t=" + Date.now();
+      function showImage(file) {
+        image.src = "/out/" + file + "?t=" + Date.now();
         image.style.display = "block";
         errorDiv.style.display = "none";
-      });
+      }
 
-      socket.on("building", function() {
-        setStatus("building…", "status-building");
-      });
+      function handleEvent(ev) {
+        switch (ev.type) {
+          case "ready":
+            setStatus("ready", "status-ready");
+            showImage(ev.file);
+            break;
+          case "building":
+            setStatus("building…", "status-building");
+            errorDiv.style.display = "none";
+            break;
+          case "error":
+            setStatus("error", "status-error");
+            errorDiv.textContent = ev.msg;
+            errorDiv.style.display = "block";
+            break;
+        }
+      }
 
-      socket.on("build_error", function(msg) {
-        setStatus("error", "status-error");
-        errorDiv.textContent = msg;
-        errorDiv.style.display = "block";
-      });
+      // SSE: server pushes build state
+      function connectSSE() {
+        var es = new EventSource("/events");
+        es.onmessage = function(msg) {
+          handleEvent(JSON.parse(msg.data));
+        };
+        es.onerror = function() {
+          setStatus("disconnected", "status-error");
+        };
+      }
+
+      // Gallery mode: populate picker and wire up selection
+      function initGallery(sketches, currentSketch) {
+        galleryMode = true;
+        sketchSelect.classList.remove("hidden");
+        sketchSelect.innerHTML = "";
+        sketches.forEach(function(s) {
+          var opt = document.createElement("option");
+          opt.value = s;
+          opt.textContent = s;
+          sketchSelect.appendChild(opt);
+        });
+
+        // Set current selection
+        if (currentSketch) {
+          sketchSelect.value = currentSketch;
+        }
+
+        sketchSelect.addEventListener("change", function() {
+          var name = this.value;
+          setStatus("building…", "status-building");
+          image.style.display = "none";
+          errorDiv.style.display = "none";
+          fetch("/api/select?name=" + encodeURIComponent(name));
+        });
+      }
+
+      // Boot: fetch initial state, start SSE, optionally trigger first build
+      function boot() {
+        fetch("/api/sketches").then(function(r) {
+          return r.ok ? r.json() : null;
+        }).then(function(sketches) {
+          return fetch("/api/state").then(function(r) {
+            return r.json();
+          }).then(function(state) {
+            // Start SSE first so we don't miss events
+            connectSSE();
+
+            if (sketches && sketches.length > 0) {
+              initGallery(sketches, state.sketch);
+
+              // If no image yet, select the first sketch to trigger a build
+              if (state.event.type !== "ready") {
+                var pick = sketches[0];
+                sketchSelect.value = pick;
+                fetch("/api/select?name=" + encodeURIComponent(pick));
+              }
+            }
+
+            // Apply whatever the server's current state is
+            if (state.event.type) {
+              handleEvent(state.event);
+            }
+          });
+        }).catch(function(err) {
+          setStatus("error", "status-error");
+          errorDiv.textContent = "Failed to connect: " + err;
+          errorDiv.style.display = "block";
+        });
+      }
+
+      boot();
     </script>
   </body>
 </html>

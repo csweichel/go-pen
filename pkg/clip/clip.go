@@ -70,14 +70,17 @@ func ClipLines(lines []plot.Line, mask []plot.XY) []plot.Line {
 		}()
 	}
 
+	// Feed all lines to workers
 	go func() {
-		defer wg.Wait()
 		for _, l := range lines {
 			in <- l
 		}
 		close(in)
-		wg.Wait()
+	}()
 
+	// Close out only after all workers have finished writing
+	go func() {
+		wg.Wait()
 		close(out)
 	}()
 
