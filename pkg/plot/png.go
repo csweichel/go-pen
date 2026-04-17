@@ -13,7 +13,7 @@ func NewPNGPlotter() PlotFunc {
 
 		dc.Clear()
 		dc.SetRGB(0, 0, 0)
-		dc.SetLineWidth(1)
+		dc.SetLineWidth(p.StrokeWidth())
 
 		for _, elem := range d {
 			err := drawPNG(dc, p, elem)

@@ -15,6 +15,9 @@ type Canvas struct {
 	Size  XY
 	DPI   int
 	Bleed XY
+	// PenWidth controls rendered stroke width for image/vector devices.
+	// If unset or <= 0, a width of 1 is used.
+	PenWidth float64
 }
 
 // Middle returns the middle point of the canvas
@@ -35,6 +38,13 @@ func (p Canvas) Up() XY {
 // Inner returns the plot size - 2*bleed
 func (p Canvas) Inner() XY {
 	return XY{p.Size.X - 2*p.Bleed.X, p.Size.Y - 2*p.Bleed.Y}
+}
+
+func (p Canvas) StrokeWidth() float64 {
+	if p.PenWidth > 0 {
+		return p.PenWidth
+	}
+	return 1
 }
 
 // Frame returns a frame around the canvas
@@ -174,7 +184,7 @@ func Run(p Canvas, d DrawFunc) {
 		deviceOptsFN = pflag.String("device-opts", "", "Path to the output device option file")
 		output       = pflag.StringP("output", "o", "", "path to the output file")
 		args         = pflag.StringToString("args", nil, "args to pass to the drawing")
-		optimisation = pflag.StringSliceP("optimise", "L", nil, "Configures optimisations. Available optimisations are llo (linear line order)")
+		optimisation = pflag.StringSliceP("optimise", "L", nil, "Configures optimisations. Available optimisations are llo (linear line order), vpype (if installed, svg only)")
 	)
 	pflag.Parse()
 
@@ -197,11 +207,15 @@ func Run(p Canvas, d DrawFunc) {
 		log.WithError(err).Fatal("drawing failed")
 	}
 
+	useVpypeOptimisation := false
 	for _, opt := range *optimisation {
 		var optf OptimisationFunc
 		switch opt {
 		case "llo":
 			optf = OptimiseLinearLineOrder
+		case "vpype":
+			useVpypeOptimisation = true
+			continue
 		default:
 			log.Fatal(fmt.Errorf("unknown optimisation: %s", opt))
 		}
@@ -227,6 +241,18 @@ func Run(p Canvas, d DrawFunc) {
 	}
 	if err != nil {
 		log.WithError(err).Fatal("cannot produce output device")
+	}
+
+	if useVpypeOptimisation {
+		if *device != "svg" {
+			log.WithField("device", *device).Warn("vpype optimisation is only supported for svg output, skipping")
+		} else {
+			err = PlotSVGWithVpype(out, p, drawing)
+			if err != nil {
+				log.WithError(err).Fatal("failed to plot drawing")
+			}
+			return
+		}
 	}
 
 	err = plot(out, p, drawing)

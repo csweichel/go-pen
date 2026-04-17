@@ -1,10 +1,12 @@
 package live
 
 import (
+	"bufio"
 	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -50,7 +52,9 @@ func Serve(fn string, addr string, customArgs []string) error {
 		tmpdir:     tmpdir,
 		customArgs: customArgs,
 		clients:    make(map[chan event]struct{}),
+		vpypeAvail: hasVpype(),
 	}
+	s.optimiseVP = s.vpypeAvail
 
 	if stat.IsDir() {
 		if _, err := os.Stat(filepath.Join(fn, "main.go")); err == nil {
@@ -94,9 +98,10 @@ func Serve(fn string, addr string, customArgs []string) error {
 
 // event is pushed to SSE clients
 type event struct {
-	Type string `json:"type"` // "ready", "building", "error"
+	Type string `json:"type"` // "ready", "building", "error", "log"
 	File string `json:"file,omitempty"`
 	Msg  string `json:"msg,omitempty"`
+	Log  string `json:"log,omitempty"`
 }
 
 type server struct {
@@ -105,20 +110,26 @@ type server struct {
 
 	singleFile string
 	galleryDir string
+	vpypeAvail bool
 
 	mu          sync.Mutex
 	outFile     string             // last rendered output path
 	current     string             // current sketch name (gallery mode)
-	stopWatch   chan struct{}       // stops the current file watcher
+	stopWatch   chan struct{}      // stops the current file watcher
 	cancelBuild context.CancelFunc // cancels in-flight build
 	lastEvent   event              // last event for new SSE clients
+	buildLog    []string
+	optimiseLLO bool
+	optimiseVP  bool
 	clients     map[chan event]struct{}
 }
 
 // broadcast sends an event to all connected SSE clients and caches it
 func (s *server) broadcast(e event) {
 	s.mu.Lock()
-	s.lastEvent = e
+	if e.Type != "log" {
+		s.lastEvent = e
+	}
 	for ch := range s.clients {
 		select {
 		case ch <- e:
@@ -197,17 +208,28 @@ func (s *server) build(fn string) {
 	ctx, cancel := context.WithTimeout(context.Background(), buildTimeout)
 	s.mu.Lock()
 	s.cancelBuild = cancel
+	s.buildLog = nil
 	s.mu.Unlock()
 
+	s.appendBuildLog("step: build requested")
+	s.appendBuildLog("step: target sketch " + fn)
+	s.appendBuildLog("step: timeout " + buildTimeout.String())
 	s.broadcast(event{Type: "building"})
 
-	out, err := execute(ctx, s.tmpdir, fn, s.customArgs)
+	s.mu.Lock()
+	optimiseLLO := s.optimiseLLO
+	optimiseVP := s.optimiseVP
+	vpypeAvail := s.vpypeAvail
+	s.mu.Unlock()
+
+	out, err := execute(ctx, s.tmpdir, fn, s.customArgs, optimiseLLO, optimiseVP, vpypeAvail, s.appendBuildLog)
 	cancel()
 	if err != nil {
 		msg := err.Error()
 		if ctx.Err() != nil {
 			msg = "build timed out"
 		}
+		s.appendBuildLog("step: build failed: " + msg)
 		log.WithError(err).WithField("fn", fn).Error("build failed")
 		s.broadcast(event{Type: "error", Msg: msg})
 		return
@@ -217,6 +239,8 @@ func (s *server) build(fn string) {
 	s.outFile = out
 	s.mu.Unlock()
 
+	s.appendBuildLog("step: build succeeded")
+	s.appendBuildLog("step: output file " + filepath.Base(out))
 	s.broadcast(event{Type: "ready", File: filepath.Base(out)})
 }
 
@@ -301,15 +325,61 @@ func (s *server) serveHTTP(l net.Listener) {
 	mux.HandleFunc("/api/state", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		state := struct {
-			Sketch string `json:"sketch"`
-			Event  event  `json:"event"`
+			Sketch string   `json:"sketch"`
+			Event  event    `json:"event"`
+			Logs   []string `json:"logs,omitempty"`
+			Optim  struct {
+				LLO        bool `json:"llo"`
+				VPype      bool `json:"vpype"`
+				VPypeAvail bool `json:"vpypeAvailable"`
+			} `json:"optim"`
 		}{
 			Sketch: s.current,
 			Event:  s.lastEvent,
+			Logs:   append([]string(nil), s.buildLog...),
 		}
+		state.Optim.LLO = s.optimiseLLO
+		state.Optim.VPype = s.optimiseVP
+		state.Optim.VPypeAvail = s.vpypeAvail
 		s.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(state)
+	})
+
+	// Update optimisation toggles from the UI.
+	mux.HandleFunc("/api/optimise", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req struct {
+			LLO   *bool `json:"llo"`
+			VPype *bool `json:"vpype"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json body", http.StatusBadRequest)
+			return
+		}
+
+		s.mu.Lock()
+		if req.LLO != nil {
+			s.optimiseLLO = *req.LLO
+		}
+		if req.VPype != nil {
+			s.optimiseVP = *req.VPype
+		}
+		curFn := s.currentMainFileLocked()
+		s.mu.Unlock()
+
+		if curFn != "" {
+			go s.build(curFn)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(struct {
+			OK bool `json:"ok"`
+		}{OK: true})
 	})
 
 	// Serve rendered output
@@ -330,19 +400,32 @@ func (s *server) serveHTTP(l net.Listener) {
 	http.Serve(l, mux)
 }
 
-func execute(ctx context.Context, tmpdir, fn string, customArgs []string) (outFN string, err error) {
-	useSVG := true
-	for _, a := range customArgs {
-		if a == "--device" || strings.HasPrefix(a, "--device=") {
-			useSVG = false
-			break
-		}
+func (s *server) appendBuildLog(line string) {
+	if strings.TrimSpace(line) == "" {
+		return
 	}
-	ext := "png"
-	if useSVG {
-		ext = "svg"
+
+	s.mu.Lock()
+	const maxLogLines = 300
+	s.buildLog = append(s.buildLog, line)
+	if len(s.buildLog) > maxLogLines {
+		s.buildLog = append([]string(nil), s.buildLog[len(s.buildLog)-maxLogLines:]...)
 	}
+	s.mu.Unlock()
+
+	s.broadcast(event{Type: "log", Log: line})
+}
+
+func execute(ctx context.Context, tmpdir, fn string, customArgs []string, optimiseLLO bool, optimiseVP bool, vpypeAvail bool, onLog func(string)) (outFN string, err error) {
+	onLog("step: resolving build settings")
+	device, deviceExplicit := parseDeviceArg(customArgs)
+	if !deviceExplicit {
+		device = "svg"
+	}
+	onLog(fmt.Sprintf("step: output device %q (explicit=%t)", device, deviceExplicit))
+	ext := outputExtForDevice(device)
 	outFN = filepath.Join(tmpdir, fmt.Sprintf("%d.%s", time.Now().UnixMilli(), ext))
+	onLog("step: output path " + outFN)
 
 	var dir, base string
 	if stat, err := os.Stat(fn); err != nil {
@@ -354,21 +437,208 @@ func execute(ctx context.Context, tmpdir, fn string, customArgs []string) (outFN
 		dir = filepath.Dir(fn)
 		base = filepath.Base(fn)
 	}
+	onLog("step: working directory " + dir)
+	onLog("step: entrypoint " + base)
 
 	var args []string
 	args = append(args, "run", base, "--output", outFN)
-	if useSVG {
-		args = append(args, "--device", "svg")
+	if !deviceExplicit {
+		args = append(args, "--device", device)
 	}
-	args = append(args, customArgs...)
+	remainingArgs, passthroughOpts := stripManagedOptimiseFlags(customArgs, map[string]struct{}{
+		"llo":   {},
+		"vpype": {},
+	})
+
+	finalOpts := uniqueStrings(passthroughOpts)
+	if optimiseLLO {
+		finalOpts = append(finalOpts, "llo")
+		onLog("step: enabling optimisation llo (UI)")
+	}
+	if optimiseVP {
+		if device != "svg" {
+			onLog("step: vpype optimisation requested but device is not svg, skipping vpype")
+		} else if !vpypeAvail {
+			onLog("step: vpype optimisation requested but vpype is unavailable, skipping vpype")
+		} else {
+			finalOpts = append(finalOpts, "vpype")
+			onLog("step: enabling optimisation vpype (UI)")
+		}
+	}
+	finalOpts = uniqueStrings(finalOpts)
+	if len(finalOpts) > 0 {
+		args = append(args, "--optimise", strings.Join(finalOpts, ","))
+	}
+	args = append(args, remainingArgs...)
 
 	log.WithField("outFN", outFN).WithField("args", args).Info("executing go-pen program")
+	onLog("step: executing command")
+	onLog("command: go " + strings.Join(args, " "))
 
 	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = dir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return outFN, cmd.Run()
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return "", err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+	onLog(fmt.Sprintf("step: started go process (pid=%d)", cmd.Process.Pid))
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go streamBuildOutput(&wg, stdout, "[go stdout] ", onLog)
+	go streamBuildOutput(&wg, stderr, "[go stderr] ", onLog)
+
+	err = cmd.Wait()
+	wg.Wait()
+	if err != nil {
+		onLog("step: go process exited with error: " + err.Error())
+	} else {
+		onLog("step: go process completed successfully")
+	}
+	return outFN, err
+}
+
+func streamBuildOutput(wg *sync.WaitGroup, r io.Reader, prefix string, onLog func(string)) {
+	defer wg.Done()
+
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		line := prefix + sc.Text()
+		fmt.Fprintln(os.Stdout, line)
+		onLog(line)
+	}
+	if err := sc.Err(); err != nil {
+		if strings.Contains(err.Error(), "file already closed") {
+			return
+		}
+		onLog(prefix + "log stream error: " + err.Error())
+	}
+}
+
+func (s *server) currentMainFileLocked() string {
+	if s.singleFile != "" {
+		if st, err := os.Stat(s.singleFile); err == nil && st.IsDir() {
+			return filepath.Join(s.singleFile, "main.go")
+		}
+		return s.singleFile
+	}
+	if s.galleryDir != "" && s.current != "" {
+		return filepath.Join(s.galleryDir, s.current, "main.go")
+	}
+	return ""
+}
+
+func stripManagedOptimiseFlags(args []string, managed map[string]struct{}) (remainingArgs []string, passthroughOpts []string) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--optimise" || a == "-L":
+			if i+1 >= len(args) {
+				remainingArgs = append(remainingArgs, a)
+				continue
+			}
+			opts := splitOptList(args[i+1])
+			for _, opt := range opts {
+				if _, isManaged := managed[opt]; isManaged {
+					continue
+				}
+				passthroughOpts = append(passthroughOpts, opt)
+			}
+			i++
+		case strings.HasPrefix(a, "--optimise="):
+			opts := splitOptList(strings.TrimPrefix(a, "--optimise="))
+			for _, opt := range opts {
+				if _, isManaged := managed[opt]; isManaged {
+					continue
+				}
+				passthroughOpts = append(passthroughOpts, opt)
+			}
+		case strings.HasPrefix(a, "-L="):
+			opts := splitOptList(strings.TrimPrefix(a, "-L="))
+			for _, opt := range opts {
+				if _, isManaged := managed[opt]; isManaged {
+					continue
+				}
+				passthroughOpts = append(passthroughOpts, opt)
+			}
+		default:
+			remainingArgs = append(remainingArgs, a)
+		}
+	}
+	return remainingArgs, passthroughOpts
+}
+
+func splitOptList(v string) []string {
+	var res []string
+	for _, s := range strings.Split(v, ",") {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		res = append(res, s)
+	}
+	return res
+}
+
+func uniqueStrings(in []string) []string {
+	seen := make(map[string]struct{}, len(in))
+	res := make([]string, 0, len(in))
+	for _, s := range in {
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		res = append(res, s)
+	}
+	return res
+}
+
+func parseDeviceArg(args []string) (device string, explicit bool) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--device" {
+			if i+1 < len(args) {
+				return args[i+1], true
+			}
+			return "", true
+		}
+		if strings.HasPrefix(a, "--device=") {
+			return strings.TrimPrefix(a, "--device="), true
+		}
+	}
+	return "", false
+}
+
+func outputExtForDevice(device string) string {
+	switch device {
+	case "svg":
+		return "svg"
+	case "gcode":
+		return "gcode"
+	case "json":
+		return "json"
+	case "png":
+		return "png"
+	default:
+		return "out"
+	}
+}
+
+func hasVpype() bool {
+	_, err := exec.LookPath("vpype")
+	return err == nil
 }
 
 func watchFile(stop chan struct{}, fn string) (changed <-chan struct{}, err error) {
