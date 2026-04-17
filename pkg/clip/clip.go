@@ -7,6 +7,9 @@ import (
 	"github.com/ctessum/geom"
 )
 
+// InvertPolygon is deprecated — use ExcludeLines instead.
+// It returns a flat point list that loses the hole structure of the
+// inverted polygon, which causes artifacts when used with ClipLines.
 func InvertPolygon(bounds plot.XY, mask []plot.XY) []plot.XY {
 	polyp := make(geom.Path, len(mask))
 	for i, p := range mask {
@@ -34,13 +37,40 @@ func InvertPolygon(bounds plot.XY, mask []plot.XY) []plot.XY {
 	return res
 }
 
+// ClipLines keeps only the portions of lines that fall inside the mask polygon.
 func ClipLines(lines []plot.Line, mask []plot.XY) []plot.Line {
 	polyp := make(geom.Path, len(mask))
 	for i, p := range mask {
 		polyp[i] = geom.Point{X: float64(p.X), Y: float64(p.Y)}
 	}
 	poly := geom.Polygon{polyp}
+	return clipLinesWithPoly(lines, poly)
+}
 
+// ExcludeLines removes the portions of lines that fall inside the exclusion
+// polygon. This is the correct way to cut a hole — it avoids the bridge-edge
+// artifacts that InvertPolygon + ClipLines produces.
+func ExcludeLines(lines []plot.Line, bounds plot.XY, exclude []plot.XY) []plot.Line {
+	// Build a proper polygon-with-hole: outer boundary + inner hole as separate paths
+	outer := geom.Path{
+		geom.Point{X: 0, Y: 0},
+		geom.Point{X: 0, Y: float64(bounds.Y)},
+		geom.Point{X: float64(bounds.X), Y: float64(bounds.Y)},
+		geom.Point{X: float64(bounds.X), Y: 0},
+		geom.Point{X: 0, Y: 0},
+	}
+	// Reverse the hole winding so it's opposite to the outer boundary
+	hole := make(geom.Path, len(exclude)+1)
+	for i, p := range exclude {
+		hole[len(exclude)-1-i] = geom.Point{X: float64(p.X), Y: float64(p.Y)}
+	}
+	hole[len(exclude)] = hole[0] // close the path
+
+	poly := geom.Polygon{outer, hole}
+	return clipLinesWithPoly(lines, poly)
+}
+
+func clipLinesWithPoly(lines []plot.Line, poly geom.Polygon) []plot.Line {
 	var (
 		in  = make(chan plot.Line)
 		out = make(chan plot.Line)

@@ -30,15 +30,15 @@ func main() {
 			fl = append(fl, field.TraceLine(p, f, s, 10, 10)...)
 		}
 
-		mask := clip.InvertPolygon(p.Inner(), []plot.XY{
+		exclude := []plot.XY{
 			p.Middle().Add(200, -100),
 			p.Middle().Add(100, 100),
 			p.Middle().Add(-200, 100),
 			p.Middle().Add(-100, -100),
-		})
-		nl := clip.ClipLines(fl, mask)
+		}
+		nl := clip.ExcludeLines(fl, p.Size, exclude)
 		for _, l := range nl {
-			d = append(d, l.Offset(p.Bleed))
+			d = append(d, l)
 		}
 
 		d = append(d, plot.AsDebug(p.Frame()...)...)
