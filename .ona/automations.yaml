@@ -5,6 +5,6 @@ services:
     commands:
       start: |
         gitpod environment port open 9999 --name "Live Preview" &
-        go run cmd/gopen/main.go preview example/hello-world/main.go
+        go run cmd/gopen/main.go preview example
     triggeredBy:
       - postDevcontainerStart
