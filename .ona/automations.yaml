@@ -1,0 +1,10 @@
+services:
+  live-preview:
+    name: Live Preview
+    description: Runs the go-pen live preview server on port 9999
+    commands:
+      start: |
+        gitpod environment port open 9999 --name "Live Preview" &
+        go run cmd/gopen/main.go preview example/hello-world/main.go
+    triggeredBy:
+      - postDevcontainerStart

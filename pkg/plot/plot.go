@@ -170,7 +170,7 @@ type DrawFunc func(p Canvas, args map[string]string) (d Drawing, err error)
 // Run executes a drawing - use this as entry point for all "sketches"
 func Run(p Canvas, d DrawFunc) {
 	var (
-		device       = pflag.String("device", "png", "Output device. Must be png or gcode")
+		device       = pflag.String("device", "png", "Output device. Must be png, svg, gcode, or json")
 		deviceOptsFN = pflag.String("device-opts", "", "Path to the output device option file")
 		output       = pflag.StringP("output", "o", "", "path to the output file")
 		args         = pflag.StringToString("args", nil, "args to pass to the drawing")
@@ -216,12 +216,14 @@ func Run(p Canvas, d DrawFunc) {
 	switch *device {
 	case "png":
 		plot = NewPNGPlotter()
+	case "svg":
+		plot = NewSVGPlotter()
 	case "gcode":
 		plot, err = NewGCodePlotter(*deviceOptsFN)
 	case "json":
 		plot = JsonPlotter
 	default:
-		log.Fatalf("Unsupported device: %s", device)
+		log.Fatalf("Unsupported device: %s", *device)
 	}
 	if err != nil {
 		log.WithError(err).Fatal("cannot produce output device")

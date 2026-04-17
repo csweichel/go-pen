@@ -88,7 +88,7 @@ func initSketch(c *cli.Context) error {
 
 	cmds := [][]string{
 		{"go", "mod", "init", c.String("pkg-name")},
-		{"go", "mod", "tidy", "-compat=1.17"},
+		{"go", "mod", "tidy"},
 	}
 	for _, c := range cmds {
 		cmd := exec.Command(c[0], c[1:]...)

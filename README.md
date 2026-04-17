@@ -6,7 +6,7 @@ go-pen is a simple generative art framework for pen plotter. It supports
 - [X] basic geometries: lines, arcs and bezier curves
 - [X] vector fields, including perlin noise generated ones
 - [X] PNG output
-- [ ] SVG output
+- [x] SVG output
 - [x] Gcode output
 
 ## Try it out

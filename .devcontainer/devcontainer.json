@@ -1,0 +1,12 @@
+{
+	"name": "go-pen",
+	"build": {
+		"context": ".",
+		"dockerfile": "Dockerfile"
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": ["golang.go"]
+		}
+	}
+}
