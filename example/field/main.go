@@ -14,8 +14,12 @@ func main() {
 	}, func(p plot.Canvas, args map[string]string) (d plot.Drawing, err error) {
 		counts := plot.XY{X: 40, Y: 80}
 
+		debug := args["debug"] == "true"
+
 		f := field.NewPerlinNoiseField(p, counts, 2, 2, 3, 1000)
-		d = append(d, plot.AsDebug(f.Draw(p.Bleed)...)...)
+		if debug {
+			d = append(d, plot.AsDebug(f.Draw(p.Bleed)...)...)
+		}
 
 		rand.Seed(4589)
 		for i := 0; i < 5000; i++ {
@@ -28,8 +32,10 @@ func main() {
 			d = append(d, lineAsDrawable(field.TraceLine(p, f, s, 10, 10))...)
 		}
 
-		d = append(d, plot.AsDebug(p.Frame()...)...)
-		d = append(d, plot.AsDebug(p.FrameBleed()...)...)
+		if debug {
+			d = append(d, plot.AsDebug(p.Frame()...)...)
+			d = append(d, plot.AsDebug(p.FrameBleed()...)...)
+		}
 
 		return d, nil
 	})

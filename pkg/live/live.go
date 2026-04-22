@@ -121,6 +121,7 @@ type server struct {
 	buildLog    []string
 	optimiseLLO bool
 	optimiseVP  bool
+	showDebug   bool
 	clients     map[chan event]struct{}
 }
 
@@ -220,9 +221,10 @@ func (s *server) build(fn string) {
 	optimiseLLO := s.optimiseLLO
 	optimiseVP := s.optimiseVP
 	vpypeAvail := s.vpypeAvail
+	showDebug := s.showDebug
 	s.mu.Unlock()
 
-	out, err := execute(ctx, s.tmpdir, fn, s.customArgs, optimiseLLO, optimiseVP, vpypeAvail, s.appendBuildLog)
+	out, err := execute(ctx, s.tmpdir, fn, s.customArgs, optimiseLLO, optimiseVP, vpypeAvail, showDebug, s.appendBuildLog)
 	cancel()
 	if err != nil {
 		msg := err.Error()
@@ -333,10 +335,12 @@ func (s *server) serveHTTP(l net.Listener) {
 				VPype      bool `json:"vpype"`
 				VPypeAvail bool `json:"vpypeAvailable"`
 			} `json:"optim"`
+			Debug bool `json:"debug"`
 		}{
 			Sketch: s.current,
 			Event:  s.lastEvent,
 			Logs:   append([]string(nil), s.buildLog...),
+			Debug:  s.showDebug,
 		}
 		state.Optim.LLO = s.optimiseLLO
 		state.Optim.VPype = s.optimiseVP
@@ -368,6 +372,38 @@ func (s *server) serveHTTP(l net.Listener) {
 		}
 		if req.VPype != nil {
 			s.optimiseVP = *req.VPype
+		}
+		curFn := s.currentMainFileLocked()
+		s.mu.Unlock()
+
+		if curFn != "" {
+			go s.build(curFn)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(struct {
+			OK bool `json:"ok"`
+		}{OK: true})
+	})
+
+	// Toggle debug overlay from the UI.
+	mux.HandleFunc("/api/debug", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req struct {
+			Debug *bool `json:"debug"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json body", http.StatusBadRequest)
+			return
+		}
+
+		s.mu.Lock()
+		if req.Debug != nil {
+			s.showDebug = *req.Debug
 		}
 		curFn := s.currentMainFileLocked()
 		s.mu.Unlock()
@@ -416,7 +452,7 @@ func (s *server) appendBuildLog(line string) {
 	s.broadcast(event{Type: "log", Log: line})
 }
 
-func execute(ctx context.Context, tmpdir, fn string, customArgs []string, optimiseLLO bool, optimiseVP bool, vpypeAvail bool, onLog func(string)) (outFN string, err error) {
+func execute(ctx context.Context, tmpdir, fn string, customArgs []string, optimiseLLO bool, optimiseVP bool, vpypeAvail bool, showDebug bool, onLog func(string)) (outFN string, err error) {
 	onLog("step: resolving build settings")
 	device, deviceExplicit := parseDeviceArg(customArgs)
 	if !deviceExplicit {
@@ -469,7 +505,47 @@ func execute(ctx context.Context, tmpdir, fn string, customArgs []string, optimi
 	if len(finalOpts) > 0 {
 		args = append(args, "--optimise", strings.Join(finalOpts, ","))
 	}
-	args = append(args, remainingArgs...)
+
+	// Inject debug toggle as a sketch arg.
+	// Strip any existing debug= from remainingArgs to avoid duplicates,
+	// then append the UI-controlled value.
+	var filteredArgs []string
+	for i := 0; i < len(remainingArgs); i++ {
+		a := remainingArgs[i]
+		if a == "--args" && i+1 < len(remainingArgs) {
+			// Filter out debug=... from the --args value
+			pairs := strings.Split(remainingArgs[i+1], ",")
+			var kept []string
+			for _, p := range pairs {
+				if !strings.HasPrefix(strings.TrimSpace(p), "debug=") {
+					kept = append(kept, p)
+				}
+			}
+			if len(kept) > 0 {
+				filteredArgs = append(filteredArgs, "--args", strings.Join(kept, ","))
+			}
+			i++ // skip the value
+		} else if strings.HasPrefix(a, "--args=") {
+			val := strings.TrimPrefix(a, "--args=")
+			pairs := strings.Split(val, ",")
+			var kept []string
+			for _, p := range pairs {
+				if !strings.HasPrefix(strings.TrimSpace(p), "debug=") {
+					kept = append(kept, p)
+				}
+			}
+			if len(kept) > 0 {
+				filteredArgs = append(filteredArgs, "--args="+strings.Join(kept, ","))
+			}
+		} else {
+			filteredArgs = append(filteredArgs, a)
+		}
+	}
+	if showDebug {
+		filteredArgs = append(filteredArgs, "--args", "debug=true")
+		onLog("step: enabling debug output (UI)")
+	}
+	args = append(args, filteredArgs...)
 
 	log.WithField("outFN", outFN).WithField("args", args).Info("executing go-pen program")
 	onLog("step: executing command")

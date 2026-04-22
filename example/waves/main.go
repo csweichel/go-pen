@@ -32,8 +32,10 @@ func main() {
 			}
 		}
 
-		d = append(d, plot.AsDebug(p.Frame()...)...)
-		d = append(d, plot.AsDebug(p.FrameBleed()...)...)
+		if args["debug"] == "true" {
+			d = append(d, plot.AsDebug(p.Frame()...)...)
+			d = append(d, plot.AsDebug(p.FrameBleed()...)...)
+		}
 
 		return d, nil
 	})

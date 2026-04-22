@@ -67,7 +67,9 @@ func main() {
 			}
 		}
 
-		d = append(d, plot.AsDebug(p.FrameBleed()...)...)
+		if args["debug"] == "true" {
+			d = append(d, plot.AsDebug(p.FrameBleed()...)...)
+		}
 		return d, nil
 	})
 }

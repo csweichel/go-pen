@@ -45,6 +45,7 @@
       <select id="sketch" class="hidden"></select>
       <div class="controls">
         <div class="opt-group">
+          <label><input type="checkbox" id="opt-debug"> debug</label>
           <label><input type="checkbox" id="opt-llo"> llo</label>
           <label><input type="checkbox" id="opt-vpype"> vpype</label>
         </div>
@@ -66,6 +67,7 @@
       var errorDiv = document.getElementById("error");
       var statusEl = document.getElementById("status");
       var sketchSelect = document.getElementById("sketch");
+      var optDebug = document.getElementById("opt-debug");
       var optLLO = document.getElementById("opt-llo");
       var optVPype = document.getElementById("opt-vpype");
       var galleryMode = false;
@@ -104,6 +106,18 @@
         } else {
           optVPype.title = "";
         }
+      }
+
+      function applyDebugState(debug) {
+        optDebug.checked = !!debug;
+      }
+
+      function updateDebug() {
+        fetch("/api/debug", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ debug: !!optDebug.checked })
+        });
       }
 
       function updateOptimisations() {
@@ -180,6 +194,7 @@
         });
       }
 
+      optDebug.addEventListener("change", updateDebug);
       optLLO.addEventListener("change", updateOptimisations);
       optVPype.addEventListener("change", updateOptimisations);
 
@@ -215,6 +230,7 @@
               buildLog.scrollTop = buildLog.scrollHeight;
             }
             applyOptimState(state.optim);
+            applyDebugState(state.debug);
           });
         }).catch(function(err) {
           setStatus("error", "status-error");
