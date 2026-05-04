@@ -178,16 +178,35 @@ type PlotFunc func(out io.Writer, p Canvas, d Drawing) error
 type DrawFunc func(p Canvas, args map[string]string) (d Drawing, err error)
 
 // Run executes a drawing - use this as entry point for all "sketches"
-func Run(p Canvas, d DrawFunc) {
+func Run(p Canvas, d DrawFunc, opts ...RunOpt) {
 	var (
 		device       = pflag.String("device", "png", "Output device. Must be png, svg, gcode, or json")
 		deviceOptsFN = pflag.String("device-opts", "", "Path to the output device option file")
 		gcodeFlavor  = pflag.String("gcode-flavor", "", "G-code flavor override for --device gcode. Available: vanilla, mk4s")
 		output       = pflag.StringP("output", "o", "", "path to the output file")
 		args         = pflag.StringToString("args", nil, "args to pass to the drawing")
+		argsSchema   = pflag.Bool("args-schema", false, "Print the sketch arg schema as JSON and exit")
 		optimisation = pflag.StringSliceP("optimise", "L", nil, "Configures optimisations. Available optimisations are llo (linear line order), vpype (if installed, svg only)")
 	)
 	pflag.Parse()
+
+	var cfg RunConfig
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&cfg)
+		}
+	}
+
+	if *argsSchema {
+		schema := cfg.ArgsSchema
+		if schema == nil {
+			schema = []ArgSpec{}
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(schema); err != nil {
+			log.WithError(err).Fatal("cannot encode args schema")
+		}
+		return
+	}
 
 	var out io.Writer
 	if *output == "" {

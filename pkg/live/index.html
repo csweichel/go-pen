@@ -7,8 +7,9 @@
       body { font-family: system-ui, sans-serif; background: #1a1a1a; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; }
       header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: #252525; border-bottom: 1px solid #333; }
       header h1 { font-size: 16px; font-weight: 600; white-space: nowrap; }
-      select, button { background: #333; color: #e0e0e0; border: 1px solid #555; border-radius: 4px; padding: 6px 12px; font-size: 14px; cursor: pointer; }
-      select:hover, button:hover { border-color: #888; }
+      select, button, input[type=text], input[type=number] { background: #333; color: #e0e0e0; border: 1px solid #555; border-radius: 4px; padding: 6px 12px; font-size: 14px; }
+      select, button { cursor: pointer; }
+      select:hover, button:hover, input[type=text]:focus, input[type=number]:focus { border-color: #888; outline: none; }
       button:disabled { cursor: not-allowed; opacity: 0.5; border-color: #555; }
       .controls { display: flex; align-items: center; gap: 12px; margin-left: auto; }
       .opt-group { display: flex; align-items: center; gap: 8px; }
@@ -20,7 +21,83 @@
       .status-building { background: #3a3a1a; color: #facc15; }
       .status-error { background: #3a1a1a; color: #f87171; }
       .hidden { display: none; }
-      main { flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center; padding: 20px; }
+      #workspace { flex: 1; min-height: 0; display: flex; }
+      #args-sidebar {
+        width: 340px;
+        display: flex;
+        flex-direction: column;
+        border-left: 1px solid #333;
+        background: #202020;
+      }
+      .sidebar-header {
+        padding: 16px 18px;
+        border-bottom: 1px solid #333;
+        background: #252525;
+      }
+      .sidebar-header h2 {
+        font-size: 13px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #b8b8b8;
+      }
+      .sidebar-body {
+        flex: 1;
+        overflow: auto;
+        padding: 16px 18px 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      #arg-fields {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .arg-field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 10px 12px;
+        background: #171717;
+        border: 1px solid #333;
+        border-radius: 6px;
+      }
+      .arg-field--bool { justify-content: center; }
+      .arg-label { font-size: 12px; font-weight: 600; color: #e0e0e0; }
+      .arg-desc { min-height: 28px; font-size: 11px; line-height: 1.3; color: #999; }
+      .arg-meta { font-size: 11px; color: #777; }
+      .arg-bool { display: flex; align-items: center; gap: 8px; color: #ddd; font-size: 13px; }
+      .arg-number-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .arg-number-input {
+        width: 92px;
+        flex: 0 0 92px;
+      }
+      .arg-slider {
+        flex: 1 1 auto;
+        min-width: 0;
+        accent-color: #7dd3fc;
+      }
+      .arg-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .arg-raw {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .arg-buttons {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      main { flex: 1; min-width: 0; overflow: auto; display: flex; align-items: center; justify-content: center; padding: 20px; }
       #image { max-width: 100%; max-height: 100%; transition: transform 0.1s; background: white; }
       #buildlog {
         display: none;
@@ -38,6 +115,15 @@
         white-space: pre-wrap;
       }
       #error { display: none; color: #f87171; font-size: 14px; text-align: center; padding: 40px; }
+      @media (max-width: 960px) {
+        #workspace { flex-direction: column; }
+        #args-sidebar {
+          width: auto;
+          max-height: 45vh;
+          border-left: 0;
+          border-top: 1px solid #333;
+        }
+      }
     </style>
   </head>
   <body>
@@ -62,11 +148,31 @@
           oninput="document.getElementById('image').style.transform='scale('+this.value/100+')'">
       </div>
     </header>
-    <main>
-      <img id="image" />
-      <pre id="buildlog"></pre>
-      <div id="error"></div>
-    </main>
+    <div id="workspace">
+      <main>
+        <img id="image" />
+        <pre id="buildlog"></pre>
+        <div id="error"></div>
+      </main>
+      <aside id="args-sidebar" class="hidden">
+        <div class="sidebar-header">
+          <h2>Args</h2>
+        </div>
+        <div class="sidebar-body">
+          <div id="arg-fields"></div>
+          <div class="arg-actions">
+            <label class="arg-raw">
+              <span class="arg-label">extra args</span>
+              <input type="text" id="raw-args" placeholder="variant=wave">
+            </label>
+            <div class="arg-buttons">
+              <button type="button" id="apply-args">apply args</button>
+              <button type="button" id="reset-args">reset</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
 
     <script>
       var image = document.getElementById("image");
@@ -79,9 +185,15 @@
       var optVPype = document.getElementById("opt-vpype");
       var gcodeFlavorSelect = document.getElementById("gcode-flavor");
       var downloadGCodeButton = document.getElementById("download-gcode");
+      var argsSidebar = document.getElementById("args-sidebar");
+      var argFields = document.getElementById("arg-fields");
+      var rawArgsInput = document.getElementById("raw-args");
+      var applyArgsButton = document.getElementById("apply-args");
+      var resetArgsButton = document.getElementById("reset-args");
       var galleryMode = false;
       var currentEventType = "";
       var exportingGCode = false;
+      var currentArgsState = { specs: [], values: {}, raw: "" };
 
       function setStatus(text, cls) {
         statusEl.textContent = text;
@@ -127,6 +239,201 @@
         optDebug.checked = !!debug;
       }
 
+      function normalizeArgsState(state) {
+        return {
+          specs: (state && state.specs) || [],
+          values: (state && state.values) || {},
+          raw: (state && state.raw) || ""
+        };
+      }
+
+      function hasArgsState(state) {
+        var normalized = normalizeArgsState(state);
+        if (normalized.specs.length > 0) {
+          return true;
+        }
+        return !!normalized.raw.trim();
+      }
+
+      function syncArgsSidebar() {
+        argsSidebar.classList.toggle("hidden", !hasArgsState(currentArgsState));
+      }
+
+      function argMeta(spec) {
+        if (spec.type === "bool") {
+          return "bool";
+        }
+        var meta = [spec.type];
+        if (spec.min != null || spec.max != null) {
+          meta.push((spec.min != null ? spec.min : "−∞") + " … " + (spec.max != null ? spec.max : "∞"));
+        }
+        return meta.join("  ");
+      }
+
+      function argStep(spec) {
+        return spec.type === "int" ? "1" : "0.01";
+      }
+
+      function syncNumericArg(field, value) {
+        var numberInput = field.querySelector('[data-arg-number]');
+        var sliderInput = field.querySelector('[data-arg-slider]');
+        if (numberInput) {
+          numberInput.value = value;
+        }
+        if (sliderInput) {
+          sliderInput.value = value;
+        }
+      }
+
+      function applyArgsState(state) {
+        currentArgsState = normalizeArgsState(state);
+        argFields.innerHTML = "";
+
+        currentArgsState.specs.forEach(function(spec) {
+          var field = document.createElement("div");
+          field.className = "arg-field" + (spec.type === "bool" ? " arg-field--bool" : "");
+          field.dataset.argName = spec.name;
+          field.dataset.argType = spec.type;
+
+          var label = document.createElement("div");
+          label.className = "arg-label";
+          label.textContent = spec.name;
+          field.appendChild(label);
+
+          if (spec.description) {
+            var desc = document.createElement("div");
+            desc.className = "arg-desc";
+            desc.textContent = spec.description;
+            field.appendChild(desc);
+          }
+
+          if (spec.type === "bool") {
+            var boolLabel = document.createElement("label");
+            boolLabel.className = "arg-bool";
+            var input = document.createElement("input");
+            input.type = "checkbox";
+            input.checked = currentArgsState.values[spec.name] === "true";
+            input.dataset.argInput = spec.name;
+            boolLabel.appendChild(input);
+            var text = document.createElement("span");
+            text.textContent = "enabled";
+            boolLabel.appendChild(text);
+            field.appendChild(boolLabel);
+          } else {
+            var row = document.createElement("div");
+            row.className = "arg-number-row";
+
+            var numberInput = document.createElement("input");
+            numberInput.type = "number";
+            numberInput.className = "arg-number-input";
+            numberInput.step = argStep(spec);
+            if (spec.min != null) numberInput.min = spec.min;
+            if (spec.max != null) numberInput.max = spec.max;
+            numberInput.value = currentArgsState.values[spec.name] || "";
+            numberInput.dataset.argInput = spec.name;
+            numberInput.dataset.argNumber = spec.name;
+            row.appendChild(numberInput);
+
+            if (spec.min != null && spec.max != null) {
+              var sliderInput = document.createElement("input");
+              sliderInput.type = "range";
+              sliderInput.className = "arg-slider";
+              sliderInput.min = spec.min;
+              sliderInput.max = spec.max;
+              sliderInput.step = argStep(spec);
+              sliderInput.value = currentArgsState.values[spec.name] || "";
+              sliderInput.dataset.argSlider = spec.name;
+              sliderInput.addEventListener("input", function() {
+                syncNumericArg(field, this.value);
+              });
+              numberInput.addEventListener("input", function() {
+                syncNumericArg(field, this.value);
+              });
+              row.appendChild(sliderInput);
+            }
+
+            field.appendChild(row);
+
+            var meta = document.createElement("div");
+            meta.className = "arg-meta";
+            meta.textContent = argMeta(spec);
+            field.appendChild(meta);
+          }
+
+          argFields.appendChild(field);
+        });
+
+        rawArgsInput.value = currentArgsState.raw || "";
+        syncArgsSidebar();
+      }
+
+      function collectArgsPayload() {
+        var values = {};
+        currentArgsState.specs.forEach(function(spec) {
+          var input = document.querySelector('[data-arg-input="' + spec.name + '"]');
+          if (!input) return;
+          if (spec.type === "bool") {
+            values[spec.name] = input.checked ? "true" : "false";
+          } else {
+            values[spec.name] = input.value;
+          }
+        });
+        return {
+          values: values,
+          raw: rawArgsInput.value || ""
+        };
+      }
+
+      function refreshArgsState() {
+        return fetch("/api/args").then(function(res) {
+          if (!res.ok) return null;
+          return res.json();
+        }).then(function(state) {
+          if (state) {
+            applyArgsState(state);
+          }
+        }).catch(function() {});
+      }
+
+      function submitArgs() {
+        var payload = collectArgsPayload();
+        fetch("/api/args", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        }).then(function(res) {
+          if (!res.ok) {
+            return res.text().then(function(text) {
+              throw new Error(text || "Failed to update args");
+            });
+          }
+          return res.json();
+        }).then(function(state) {
+          applyArgsState(state);
+        }).catch(function(err) {
+          window.alert("Failed to update args: " + err.message);
+        });
+      }
+
+      function resetArgs() {
+        fetch("/api/args", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reset: true })
+        }).then(function(res) {
+          if (!res.ok) {
+            return res.text().then(function(text) {
+              throw new Error(text || "Failed to reset args");
+            });
+          }
+          return res.json();
+        }).then(function(state) {
+          applyArgsState(state);
+        }).catch(function(err) {
+          window.alert("Failed to reset args: " + err.message);
+        });
+      }
+
       function updateDebug() {
         fetch("/api/debug", {
           method: "POST",
@@ -153,11 +460,13 @@
           case "ready":
             setStatus("ready", "status-ready");
             showImage(ev.file);
+            refreshArgsState();
             break;
           case "building":
             setStatus("building…", "status-building");
             buildLog.textContent = "";
             showBuildLog();
+            refreshArgsState();
             break;
           case "log":
             showBuildLog();
@@ -277,7 +586,7 @@
           setStatus("building…", "status-building");
           buildLog.textContent = "";
           showBuildLog();
-          fetch("/api/select?name=" + encodeURIComponent(name));
+          fetch("/api/select?name=" + encodeURIComponent(name)).then(refreshArgsState);
         });
       }
 
@@ -285,6 +594,14 @@
       optLLO.addEventListener("change", updateOptimisations);
       optVPype.addEventListener("change", updateOptimisations);
       downloadGCodeButton.addEventListener("click", downloadGCode);
+      applyArgsButton.addEventListener("click", submitArgs);
+      resetArgsButton.addEventListener("click", resetArgs);
+      rawArgsInput.addEventListener("keydown", function(ev) {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          submitArgs();
+        }
+      });
 
       // Boot: fetch initial state, start SSE, optionally trigger first build
       function boot() {
@@ -319,6 +636,7 @@
             }
             applyOptimState(state.optim);
             applyDebugState(state.debug);
+            applyArgsState(state.args);
           });
         }).catch(function(err) {
           setStatus("error", "status-error");

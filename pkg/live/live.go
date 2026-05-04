@@ -50,12 +50,12 @@ func Serve(fn string, addr string, customArgs []string) error {
 	}
 
 	s := &server{
-		tmpdir:     tmpdir,
-		customArgs: customArgs,
-		clients:    make(map[chan event]struct{}),
-		vpypeAvail: hasVpype(),
+		tmpdir:      tmpdir,
+		customArgs:  customArgs,
+		clients:     make(map[chan event]struct{}),
+		argProfiles: make(map[string]argProfile),
+		vpypeAvail:  hasVpype(),
 	}
-	s.optimiseVP = s.vpypeAvail
 
 	if stat.IsDir() {
 		if _, err := os.Stat(filepath.Join(fn, "main.go")); err == nil {
@@ -124,6 +124,7 @@ type server struct {
 	optimiseVP  bool
 	showDebug   bool
 	clients     map[chan event]struct{}
+	argProfiles map[string]argProfile
 }
 
 // broadcast sends an event to all connected SSE clients and caches it
@@ -225,7 +226,8 @@ func (s *server) build(fn string) {
 	showDebug := s.showDebug
 	s.mu.Unlock()
 
-	out, err := execute(ctx, s.tmpdir, fn, s.customArgs, optimiseLLO, optimiseVP, vpypeAvail, showDebug, "", nil, s.appendBuildLog)
+	sketchArgs := s.currentSketchArgs(fn)
+	out, err := execute(ctx, s.tmpdir, fn, s.customArgs, sketchArgs, optimiseLLO, optimiseVP, vpypeAvail, showDebug, "", nil, s.appendBuildLog)
 	cancel()
 	if err != nil {
 		msg := err.Error()
@@ -327,6 +329,7 @@ func (s *server) serveHTTP(l net.Listener) {
 	// Current state
 	mux.HandleFunc("/api/state", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
+		curFn := s.currentMainFileLocked()
 		state := struct {
 			Sketch string   `json:"sketch"`
 			Event  event    `json:"event"`
@@ -336,7 +339,8 @@ func (s *server) serveHTTP(l net.Listener) {
 				VPype      bool `json:"vpype"`
 				VPypeAvail bool `json:"vpypeAvailable"`
 			} `json:"optim"`
-			Debug bool `json:"debug"`
+			Debug bool     `json:"debug"`
+			Args  argState `json:"args"`
 		}{
 			Sketch: s.current,
 			Event:  s.lastEvent,
@@ -347,6 +351,7 @@ func (s *server) serveHTTP(l net.Listener) {
 		state.Optim.VPype = s.optimiseVP
 		state.Optim.VPypeAvail = s.vpypeAvail
 		s.mu.Unlock()
+		state.Args = s.argsState(curFn)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(state)
 	})
@@ -419,6 +424,42 @@ func (s *server) serveHTTP(l net.Listener) {
 		}{OK: true})
 	})
 
+	mux.HandleFunc("/api/args", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		fn := s.currentMainFileLocked()
+		s.mu.Unlock()
+
+		if fn == "" {
+			http.Error(w, "no sketch selected", http.StatusBadRequest)
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(s.argsState(fn))
+		case http.MethodPost:
+			var req argUpdateRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "invalid json body", http.StatusBadRequest)
+				return
+			}
+
+			state, err := s.updateArgs(fn, req)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
+			go s.build(fn)
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(state)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
 	// Export the current sketch as G-code without replacing the preview asset.
 	mux.HandleFunc("/api/export/gcode", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -433,6 +474,7 @@ func (s *server) serveHTTP(l net.Listener) {
 		optimiseVP := s.optimiseVP
 		vpypeAvail := s.vpypeAvail
 		showDebug := s.showDebug
+		sketchArgs := s.currentSketchArgs(fn)
 		s.mu.Unlock()
 
 		if fn == "" {
@@ -449,7 +491,7 @@ func (s *server) serveHTTP(l net.Listener) {
 		ctx, cancel := context.WithTimeout(r.Context(), buildTimeout)
 		defer cancel()
 
-		out, err := execute(ctx, s.tmpdir, fn, s.customArgs, optimiseLLO, optimiseVP, vpypeAvail, showDebug, "gcode", []string{"--gcode-flavor", string(flavor)}, func(line string) {
+		out, err := execute(ctx, s.tmpdir, fn, s.customArgs, sketchArgs, optimiseLLO, optimiseVP, vpypeAvail, showDebug, "gcode", []string{"--gcode-flavor", string(flavor)}, func(line string) {
 			log.WithField("sketch", sketchName).Debug(line)
 		})
 		if err != nil {
@@ -515,7 +557,7 @@ func (s *server) appendBuildLog(line string) {
 	s.broadcast(event{Type: "log", Log: line})
 }
 
-func execute(ctx context.Context, tmpdir, fn string, customArgs []string, optimiseLLO bool, optimiseVP bool, vpypeAvail bool, showDebug bool, forcedDevice string, extraArgs []string, onLog func(string)) (outFN string, err error) {
+func execute(ctx context.Context, tmpdir, fn string, customArgs []string, sketchArgs map[string]string, optimiseLLO bool, optimiseVP bool, vpypeAvail bool, showDebug bool, forcedDevice string, extraArgs []string, onLog func(string)) (outFN string, err error) {
 	if onLog == nil {
 		onLog = func(string) {}
 	}
@@ -541,15 +583,9 @@ func execute(ctx context.Context, tmpdir, fn string, customArgs []string, optimi
 	}
 	onLog("step: output path " + outFN)
 
-	var dir, base string
-	if stat, err := os.Stat(fn); err != nil {
+	dir, base, err := resolveSketchEntrypoint(fn)
+	if err != nil {
 		return "", err
-	} else if stat.IsDir() {
-		dir = fn
-		base = "main.go"
-	} else {
-		dir = filepath.Dir(fn)
-		base = filepath.Base(fn)
 	}
 	onLog("step: working directory " + dir)
 	onLog("step: entrypoint " + base)
@@ -560,7 +596,8 @@ func execute(ctx context.Context, tmpdir, fn string, customArgs []string, optimi
 		args = append(args, "--device-opts", renderArgs.DeviceOpts)
 		onLog("step: using device opts " + renderArgs.DeviceOpts)
 	}
-	remainingArgs, passthroughOpts := stripManagedOptimiseFlags(renderArgs.RemainingArgs, map[string]struct{}{
+	remainingArgs, programArgs := stripSketchArgsFlags(renderArgs.RemainingArgs)
+	remainingArgs, passthroughOpts := stripManagedOptimiseFlags(remainingArgs, map[string]struct{}{
 		"llo":   {},
 		"vpype": {},
 	})
@@ -585,46 +622,22 @@ func execute(ctx context.Context, tmpdir, fn string, customArgs []string, optimi
 		args = append(args, "--optimise", strings.Join(finalOpts, ","))
 	}
 
-	// Inject debug toggle as a sketch arg.
-	// Strip any existing debug= from remainingArgs to avoid duplicates,
-	// then append the UI-controlled value.
-	var filteredArgs []string
-	for i := 0; i < len(remainingArgs); i++ {
-		a := remainingArgs[i]
-		if a == "--args" && i+1 < len(remainingArgs) {
-			// Filter out debug=... from the --args value
-			pairs := strings.Split(remainingArgs[i+1], ",")
-			var kept []string
-			for _, p := range pairs {
-				if !strings.HasPrefix(strings.TrimSpace(p), "debug=") {
-					kept = append(kept, p)
-				}
-			}
-			if len(kept) > 0 {
-				filteredArgs = append(filteredArgs, "--args", strings.Join(kept, ","))
-			}
-			i++ // skip the value
-		} else if strings.HasPrefix(a, "--args=") {
-			val := strings.TrimPrefix(a, "--args=")
-			pairs := strings.Split(val, ",")
-			var kept []string
-			for _, p := range pairs {
-				if !strings.HasPrefix(strings.TrimSpace(p), "debug=") {
-					kept = append(kept, p)
-				}
-			}
-			if len(kept) > 0 {
-				filteredArgs = append(filteredArgs, "--args="+strings.Join(kept, ","))
-			}
-		} else {
-			filteredArgs = append(filteredArgs, a)
-		}
+	if sketchArgs != nil {
+		programArgs = copyStringMap(sketchArgs)
 	}
+	delete(programArgs, "debug")
 	if showDebug {
-		filteredArgs = append(filteredArgs, "--args", "debug=true")
+		if programArgs == nil {
+			programArgs = make(map[string]string)
+		}
+		programArgs["debug"] = "true"
 		onLog("step: enabling debug output (UI)")
 	}
-	args = append(args, filteredArgs...)
+	if encoded := encodeSketchArgsValue(programArgs); encoded != "" {
+		args = append(args, "--args", encoded)
+		onLog("step: using sketch args " + encoded)
+	}
+	args = append(args, remainingArgs...)
 	if len(extraArgs) > 0 {
 		args = append(args, extraArgs...)
 	}

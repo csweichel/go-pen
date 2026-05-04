@@ -51,7 +51,12 @@ func main() {
 		}
 
 		return d, nil
-	})
+	}, plot.WithArgSchema(
+		plot.IntArg("order", "Hilbert curve order", 2, 6, 4),
+		plot.IntArg("min", "Minimum extra stroke count", 0, 80, 4),
+		plot.IntArg("max", "Maximum extra stroke count", 1, 120, 40),
+		plot.FloatArg("step", "Offset spacing between stroke lanes", 0.1, 2, 0.72),
+	))
 }
 
 // thicknessGradient produces a center-heavy inside-out gradient:
