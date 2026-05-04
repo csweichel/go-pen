@@ -23,7 +23,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-//go:embed index.html
+//go:generate go run ../../cmd/build-live-ui
+//go:embed index.html app.js
 var index embed.FS
 
 const buildTimeout = 60 * time.Second
