@@ -26,7 +26,8 @@ type ArgSpec struct {
 type RunOpt func(*RunConfig)
 
 type RunConfig struct {
-	ArgsSchema []ArgSpec
+	ArgsSchema  []ArgSpec
+	Interactive *InteractiveHooks
 }
 
 func WithArgSchema(specs ...ArgSpec) RunOpt {
@@ -37,6 +38,13 @@ func WithArgSchema(specs ...ArgSpec) RunOpt {
 
 func WithArgsSchema(specs ...ArgSpec) RunOpt {
 	return WithArgSchema(specs...)
+}
+
+func WithInteractive(h InteractiveHooks) RunOpt {
+	return func(cfg *RunConfig) {
+		hCopy := h
+		cfg.Interactive = &hCopy
+	}
 }
 
 func IntArg(name string, description string, min int, max int, def int) ArgSpec {

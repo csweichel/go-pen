@@ -180,13 +180,18 @@ type DrawFunc func(p Canvas, args map[string]string) (d Drawing, err error)
 // Run executes a drawing - use this as entry point for all "sketches"
 func Run(p Canvas, d DrawFunc, opts ...RunOpt) {
 	var (
-		device       = pflag.String("device", "png", "Output device. Must be png, svg, gcode, or json")
-		deviceOptsFN = pflag.String("device-opts", "", "Path to the output device option file")
-		gcodeFlavor  = pflag.String("gcode-flavor", "", "G-code flavor override for --device gcode. Available: vanilla, mk4s")
-		output       = pflag.StringP("output", "o", "", "path to the output file")
-		args         = pflag.StringToString("args", nil, "args to pass to the drawing")
-		argsSchema   = pflag.Bool("args-schema", false, "Print the sketch arg schema as JSON and exit")
-		optimisation = pflag.StringSliceP("optimise", "L", nil, "Configures optimisations. Available optimisations are llo (linear line order), vpype (if installed, svg only)")
+		device              = pflag.String("device", "png", "Output device. Must be png, svg, gcode, or json")
+		deviceOptsFN        = pflag.String("device-opts", "", "Path to the output device option file")
+		gcodeFlavor         = pflag.String("gcode-flavor", "", "G-code flavor override for --device gcode. Available: vanilla, mk4s")
+		output              = pflag.StringP("output", "o", "", "path to the output file")
+		args                = pflag.StringToString("args", nil, "args to pass to the drawing")
+		argsSchema          = pflag.Bool("args-schema", false, "Print the sketch arg schema as JSON and exit")
+		interactiveDescribe = pflag.Bool("interactive-describe", false, "Print the sketch interactive manifest as JSON and exit")
+		interactiveApply    = pflag.Bool("interactive-apply", false, "Apply an interactive action and print the updated state as JSON, then exit")
+		interactiveState    = pflag.String("interactive-state", "", "Path to the current interactive state JSON file")
+		interactiveTool     = pflag.String("interactive-tool", "", "Interactive tool id used with --interactive-apply")
+		interactiveRegion   = pflag.String("interactive-region", "", "Interactive region id used with --interactive-apply")
+		optimisation        = pflag.StringSliceP("optimise", "L", nil, "Configures optimisations. Available optimisations are llo (linear line order), vpype (if installed, svg only)")
 	)
 	pflag.Parse()
 
@@ -197,6 +202,8 @@ func Run(p Canvas, d DrawFunc, opts ...RunOpt) {
 		}
 	}
 
+	setInteractiveStatePath(*interactiveState)
+
 	if *argsSchema {
 		schema := cfg.ArgsSchema
 		if schema == nil {
@@ -204,6 +211,48 @@ func Run(p Canvas, d DrawFunc, opts ...RunOpt) {
 		}
 		if err := json.NewEncoder(os.Stdout).Encode(schema); err != nil {
 			log.WithError(err).Fatal("cannot encode args schema")
+		}
+		return
+	}
+
+	rawInteractiveState, err := InteractiveStateRaw()
+	if err != nil {
+		log.WithError(err).Fatal("cannot load interactive state")
+	}
+
+	if *interactiveDescribe {
+		manifest := InteractiveManifest{
+			Canvas:  InteractiveCanvas{Width: p.Size.X, Height: p.Size.Y},
+			Tools:   []InteractiveTool{},
+			Regions: []InteractiveRegion{},
+		}
+		if cfg.Interactive != nil && cfg.Interactive.Describe != nil {
+			manifest, err = cfg.Interactive.Describe(p, *args, rawInteractiveState)
+			if err != nil {
+				log.WithError(err).Fatal("cannot describe interactive sketch")
+			}
+		}
+		if err := json.NewEncoder(os.Stdout).Encode(manifest); err != nil {
+			log.WithError(err).Fatal("cannot encode interactive manifest")
+		}
+		return
+	}
+
+	if *interactiveApply {
+		if cfg.Interactive == nil || cfg.Interactive.Apply == nil {
+			log.Fatal("interactive apply is not supported by this sketch")
+		}
+
+		nextState, err := cfg.Interactive.Apply(p, *args, rawInteractiveState, InteractiveAction{
+			Tool:   *interactiveTool,
+			Region: *interactiveRegion,
+		})
+		if err != nil {
+			log.WithError(err).Fatal("cannot apply interactive action")
+		}
+
+		if err := json.NewEncoder(os.Stdout).Encode(InteractiveApplyResult{State: nextState}); err != nil {
+			log.WithError(err).Fatal("cannot encode interactive apply result")
 		}
 		return
 	}

@@ -35,14 +35,12 @@ type argUpdateRequest struct {
 }
 
 func (s *server) currentSketchArgs(fn string) map[string]string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	profile, ok := s.argProfiles[fn]
-	if !ok || profile.Values == nil {
+	if fn == "" {
 		return nil
 	}
-	return copyStringMap(profile.Values)
+
+	profile := s.syncArgProfile(fn)
+	return currentArgsForProfile(profile, s.customArgs)
 }
 
 func (s *server) argsState(fn string) argState {
@@ -91,14 +89,17 @@ func (s *server) updateArgs(fn string, req argUpdateRequest) (argState, error) {
 
 func (s *server) saveArgProfile(fn string, profile argProfile) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.argProfiles[fn] = profile
+	s.mu.Unlock()
+	s.persistProfile(fn)
 }
 
 func (s *server) syncArgProfile(fn string) argProfile {
 	if fn == "" {
 		return argProfile{}
 	}
+
+	s.ensureProfileLoaded(fn)
 
 	modTime := sourceModTime(fn)
 

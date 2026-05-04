@@ -98,7 +98,65 @@
         gap: 8px;
       }
       main { flex: 1; min-width: 0; overflow: auto; display: flex; align-items: center; justify-content: center; padding: 20px; }
+      #preview-stage {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        max-width: 100%;
+        max-height: 100%;
+      }
       #image { max-width: 100%; max-height: 100%; transition: transform 0.1s; background: white; }
+      #interaction-overlay {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: none;
+      }
+      #interaction-overlay.active {
+        display: block;
+        pointer-events: auto;
+      }
+      .interactive-section {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .interactive-section.hidden {
+        display: none;
+      }
+      .interactive-tools {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .interactive-tool {
+        text-align: left;
+        min-height: 44px;
+        line-height: 1.2;
+      }
+      .interactive-tool.active {
+        border-color: #7dd3fc;
+        background: #143040;
+      }
+      .interactive-help {
+        font-size: 11px;
+        line-height: 1.4;
+        color: #8f8f8f;
+      }
+      .interactive-region {
+        cursor: pointer;
+      }
+      .interactive-region:hover {
+        stroke: #facc15 !important;
+      }
+      .interactive-label {
+        font: 12px/1.2 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        text-anchor: middle;
+        dominant-baseline: central;
+        pointer-events: none;
+      }
       #buildlog {
         display: none;
         width: 100%;
@@ -150,7 +208,10 @@
     </header>
     <div id="workspace">
       <main>
-        <img id="image" />
+        <div id="preview-stage">
+          <img id="image" />
+          <svg id="interaction-overlay"></svg>
+        </div>
         <pre id="buildlog"></pre>
         <div id="error"></div>
       </main>
@@ -159,6 +220,11 @@
           <h2>Args</h2>
         </div>
         <div class="sidebar-body">
+          <section id="interactive-section" class="interactive-section hidden">
+            <div class="arg-label">interactive</div>
+            <div id="interactive-tools" class="interactive-tools"></div>
+            <div id="interactive-help" class="interactive-help">Select a tool and click the preview overlay to edit persisted sketch state.</div>
+          </section>
           <div id="arg-fields"></div>
           <div class="arg-actions">
             <label class="arg-raw">
@@ -175,7 +241,10 @@
     </div>
 
     <script>
+      var svgNS = "http://www.w3.org/2000/svg";
+      var previewStage = document.getElementById("preview-stage");
       var image = document.getElementById("image");
+      var interactionOverlay = document.getElementById("interaction-overlay");
       var buildLog = document.getElementById("buildlog");
       var errorDiv = document.getElementById("error");
       var statusEl = document.getElementById("status");
@@ -190,10 +259,15 @@
       var rawArgsInput = document.getElementById("raw-args");
       var applyArgsButton = document.getElementById("apply-args");
       var resetArgsButton = document.getElementById("reset-args");
+      var interactiveSection = document.getElementById("interactive-section");
+      var interactiveTools = document.getElementById("interactive-tools");
+      var interactiveHelp = document.getElementById("interactive-help");
       var galleryMode = false;
       var currentEventType = "";
       var exportingGCode = false;
       var currentArgsState = { specs: [], values: {}, raw: "" };
+      var currentInteractiveState = { manifest: { canvas: { width: 0, height: 0 }, tools: [], regions: [], defaultTool: "" } };
+      var selectedInteractiveTool = "";
 
       function setStatus(text, cls) {
         statusEl.textContent = text;
@@ -206,13 +280,14 @@
 
       function showImage(file) {
         image.src = "/out/" + file + "?t=" + Date.now();
-        image.style.display = "block";
+        previewStage.style.display = "flex";
         buildLog.style.display = "none";
         errorDiv.style.display = "none";
+        renderInteractiveOverlay();
       }
 
       function showBuildLog() {
-        image.style.display = "none";
+        previewStage.style.display = "none";
         buildLog.style.display = "block";
         errorDiv.style.display = "none";
       }
@@ -247,6 +322,18 @@
         };
       }
 
+      function normalizeInteractiveState(state) {
+        var manifest = (state && state.manifest) || {};
+        return {
+          manifest: {
+            canvas: manifest.canvas || { width: 0, height: 0 },
+            tools: manifest.tools || [],
+            regions: manifest.regions || [],
+            defaultTool: manifest.defaultTool || ""
+          }
+        };
+      }
+
       function hasArgsState(state) {
         var normalized = normalizeArgsState(state);
         if (normalized.specs.length > 0) {
@@ -255,8 +342,15 @@
         return !!normalized.raw.trim();
       }
 
-      function syncArgsSidebar() {
-        argsSidebar.classList.toggle("hidden", !hasArgsState(currentArgsState));
+      function hasInteractiveState(state) {
+        var normalized = normalizeInteractiveState(state);
+        return normalized.manifest.tools.length > 0 || normalized.manifest.regions.length > 0;
+      }
+
+      function syncSidebar() {
+        var show = hasArgsState(currentArgsState) || hasInteractiveState(currentInteractiveState);
+        argsSidebar.classList.toggle("hidden", !show);
+        interactiveSection.classList.toggle("hidden", !hasInteractiveState(currentInteractiveState));
       }
 
       function argMeta(spec) {
@@ -364,7 +458,145 @@
         });
 
         rawArgsInput.value = currentArgsState.raw || "";
-        syncArgsSidebar();
+        syncSidebar();
+      }
+
+      function ensureSelectedInteractiveTool() {
+        var tools = currentInteractiveState.manifest.tools || [];
+        if (tools.length === 0) {
+          selectedInteractiveTool = "";
+          return;
+        }
+
+        var found = tools.some(function(tool) {
+          return tool.id === selectedInteractiveTool;
+        });
+        if (found) {
+          return;
+        }
+
+        if (currentInteractiveState.manifest.defaultTool) {
+          selectedInteractiveTool = currentInteractiveState.manifest.defaultTool;
+          return;
+        }
+        selectedInteractiveTool = tools[0].id;
+      }
+
+      function renderInteractiveTools() {
+        interactiveTools.innerHTML = "";
+        var tools = currentInteractiveState.manifest.tools || [];
+        tools.forEach(function(tool) {
+          var button = document.createElement("button");
+          button.type = "button";
+          button.className = "interactive-tool" + (tool.id === selectedInteractiveTool ? " active" : "");
+          button.textContent = tool.label;
+          if (tool.description) {
+            button.title = tool.description;
+          }
+          button.addEventListener("click", function() {
+            selectedInteractiveTool = tool.id;
+            renderInteractiveTools();
+          });
+          interactiveTools.appendChild(button);
+        });
+      }
+
+      function renderInteractiveOverlay() {
+        var manifest = currentInteractiveState.manifest || {};
+        var regions = manifest.regions || [];
+        var canvas = manifest.canvas || { width: 0, height: 0 };
+
+        if (previewStage.style.display === "none" || !image.src || regions.length === 0 || !canvas.width || !canvas.height) {
+          interactionOverlay.innerHTML = "";
+          interactionOverlay.classList.remove("active");
+          return;
+        }
+
+        interactionOverlay.setAttribute("viewBox", "0 0 " + canvas.width + " " + canvas.height);
+        interactionOverlay.innerHTML = "";
+
+        regions.forEach(function(region) {
+          var group = document.createElementNS(svgNS, "g");
+          var rect = document.createElementNS(svgNS, "rect");
+          rect.setAttribute("x", region.x);
+          rect.setAttribute("y", region.y);
+          rect.setAttribute("width", region.width);
+          rect.setAttribute("height", region.height);
+          rect.setAttribute("rx", "4");
+          rect.setAttribute("ry", "4");
+          rect.setAttribute("fill", region.fill || "rgba(125, 211, 252, 0.04)");
+          rect.setAttribute("stroke", region.stroke || "rgba(125, 211, 252, 0.35)");
+          rect.setAttribute("stroke-width", "1.5");
+          rect.setAttribute("class", "interactive-region");
+          rect.addEventListener("click", function(ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            submitInteractive(region.id);
+          });
+          if (region.hint) {
+            var title = document.createElementNS(svgNS, "title");
+            title.textContent = region.hint;
+            rect.appendChild(title);
+          }
+          group.appendChild(rect);
+
+          if (region.label) {
+            var text = document.createElementNS(svgNS, "text");
+            text.setAttribute("x", region.x + region.width / 2);
+            text.setAttribute("y", region.y + region.height / 2);
+            text.setAttribute("fill", region.textColor || "#7dd3fc");
+            text.setAttribute("class", "interactive-label");
+            text.textContent = region.label;
+            group.appendChild(text);
+          }
+
+          interactionOverlay.appendChild(group);
+        });
+
+        interactionOverlay.classList.add("active");
+      }
+
+      function applyInteractiveState(state) {
+        currentInteractiveState = normalizeInteractiveState(state);
+        ensureSelectedInteractiveTool();
+        renderInteractiveTools();
+        renderInteractiveOverlay();
+        syncSidebar();
+      }
+
+      function refreshInteractiveState() {
+        return fetch("/api/interactive").then(function(res) {
+          if (!res.ok) return null;
+          return res.json();
+        }).then(function(state) {
+          if (state) {
+            applyInteractiveState(state);
+          }
+        }).catch(function() {});
+      }
+
+      function submitInteractive(regionID) {
+        if (!selectedInteractiveTool) {
+          window.alert("Select an interactive tool first.");
+          return;
+        }
+
+        fetch("/api/interactive", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tool: selectedInteractiveTool, region: regionID })
+        }).then(function(res) {
+          if (!res.ok) {
+            return res.text().then(function(text) {
+              throw new Error(text || "Failed to update interactive state");
+            });
+          }
+          return res.json();
+        }).then(function(state) {
+          applyInteractiveState(state);
+        }).catch(function(err) {
+          window.alert("Failed to update interactive state: " + err.message);
+        });
       }
 
       function collectArgsPayload() {
@@ -461,6 +693,7 @@
             setStatus("ready", "status-ready");
             showImage(ev.file);
             refreshArgsState();
+            refreshInteractiveState();
             break;
           case "building":
             setStatus("building…", "status-building");
@@ -475,7 +708,7 @@
           case "error":
             setStatus("error", "status-error");
             errorDiv.textContent = ev.msg;
-            image.style.display = "none";
+            previewStage.style.display = "none";
             buildLog.style.display = "none";
             errorDiv.style.display = "block";
             break;
@@ -596,6 +829,7 @@
       downloadGCodeButton.addEventListener("click", downloadGCode);
       applyArgsButton.addEventListener("click", submitArgs);
       resetArgsButton.addEventListener("click", resetArgs);
+      image.addEventListener("load", renderInteractiveOverlay);
       rawArgsInput.addEventListener("keydown", function(ev) {
         if (ev.key === "Enter") {
           ev.preventDefault();
@@ -637,6 +871,7 @@
             applyOptimState(state.optim);
             applyDebugState(state.debug);
             applyArgsState(state.args);
+            applyInteractiveState(state.interactive);
           });
         }).catch(function(err) {
           setStatus("error", "status-error");

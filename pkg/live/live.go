@@ -50,16 +50,18 @@ func Serve(fn string, addr string, customArgs []string) error {
 	}
 
 	s := &server{
-		tmpdir:      tmpdir,
-		customArgs:  customArgs,
-		clients:     make(map[chan event]struct{}),
-		argProfiles: make(map[string]argProfile),
-		vpypeAvail:  hasVpype(),
+		tmpdir:            tmpdir,
+		customArgs:        customArgs,
+		clients:           make(map[chan event]struct{}),
+		argProfiles:       make(map[string]argProfile),
+		interactiveStates: make(map[string]json.RawMessage),
+		profileLoaded:     make(map[string]bool),
+		vpypeAvail:        hasVpype(),
 	}
 
 	if stat.IsDir() {
 		if _, err := os.Stat(filepath.Join(fn, "main.go")); err == nil {
-			s.singleFile = fn
+			s.singleFile = filepath.Join(fn, "main.go")
 		} else {
 			s.galleryDir = fn
 		}
@@ -113,18 +115,20 @@ type server struct {
 	galleryDir string
 	vpypeAvail bool
 
-	mu          sync.Mutex
-	outFile     string             // last rendered output path
-	current     string             // current sketch name (gallery mode)
-	stopWatch   chan struct{}      // stops the current file watcher
-	cancelBuild context.CancelFunc // cancels in-flight build
-	lastEvent   event              // last event for new SSE clients
-	buildLog    []string
-	optimiseLLO bool
-	optimiseVP  bool
-	showDebug   bool
-	clients     map[chan event]struct{}
-	argProfiles map[string]argProfile
+	mu                sync.Mutex
+	outFile           string             // last rendered output path
+	current           string             // current sketch name (gallery mode)
+	stopWatch         chan struct{}      // stops the current file watcher
+	cancelBuild       context.CancelFunc // cancels in-flight build
+	lastEvent         event              // last event for new SSE clients
+	buildLog          []string
+	optimiseLLO       bool
+	optimiseVP        bool
+	showDebug         bool
+	clients           map[chan event]struct{}
+	argProfiles       map[string]argProfile
+	interactiveStates map[string]json.RawMessage
+	profileLoaded     map[string]bool
 }
 
 // broadcast sends an event to all connected SSE clients and caches it
@@ -227,7 +231,8 @@ func (s *server) build(fn string) {
 	s.mu.Unlock()
 
 	sketchArgs := s.currentSketchArgs(fn)
-	out, err := execute(ctx, s.tmpdir, fn, s.customArgs, sketchArgs, optimiseLLO, optimiseVP, vpypeAvail, showDebug, "", nil, s.appendBuildLog)
+	interactiveState := s.currentInteractiveState(fn)
+	out, err := execute(ctx, s.tmpdir, fn, s.customArgs, sketchArgs, interactiveState, optimiseLLO, optimiseVP, vpypeAvail, showDebug, "", nil, s.appendBuildLog)
 	cancel()
 	if err != nil {
 		msg := err.Error()
@@ -339,8 +344,9 @@ func (s *server) serveHTTP(l net.Listener) {
 				VPype      bool `json:"vpype"`
 				VPypeAvail bool `json:"vpypeAvailable"`
 			} `json:"optim"`
-			Debug bool     `json:"debug"`
-			Args  argState `json:"args"`
+			Debug       bool             `json:"debug"`
+			Args        argState         `json:"args"`
+			Interactive interactiveState `json:"interactive"`
 		}{
 			Sketch: s.current,
 			Event:  s.lastEvent,
@@ -352,6 +358,12 @@ func (s *server) serveHTTP(l net.Listener) {
 		state.Optim.VPypeAvail = s.vpypeAvail
 		s.mu.Unlock()
 		state.Args = s.argsState(curFn)
+		interactiveState, err := s.interactiveState(curFn)
+		if err == nil {
+			state.Interactive = interactiveState
+		} else {
+			log.WithError(err).WithField("sketch", sketchNameForMainFile(curFn)).Warn("cannot load interactive state")
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(state)
 	})
@@ -460,6 +472,47 @@ func (s *server) serveHTTP(l net.Listener) {
 		}
 	})
 
+	mux.HandleFunc("/api/interactive", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		fn := s.currentMainFileLocked()
+		s.mu.Unlock()
+
+		if fn == "" {
+			http.Error(w, "no sketch selected", http.StatusBadRequest)
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			state, err := s.interactiveState(fn)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(state)
+		case http.MethodPost:
+			var req interactiveUpdateRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "invalid json body", http.StatusBadRequest)
+				return
+			}
+
+			state, err := s.updateInteractive(fn, req)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+
+			go s.build(fn)
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(state)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
 	// Export the current sketch as G-code without replacing the preview asset.
 	mux.HandleFunc("/api/export/gcode", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -474,13 +527,15 @@ func (s *server) serveHTTP(l net.Listener) {
 		optimiseVP := s.optimiseVP
 		vpypeAvail := s.vpypeAvail
 		showDebug := s.showDebug
-		sketchArgs := s.currentSketchArgs(fn)
 		s.mu.Unlock()
 
 		if fn == "" {
 			http.Error(w, "no sketch selected", http.StatusBadRequest)
 			return
 		}
+
+		sketchArgs := s.currentSketchArgs(fn)
+		interactiveState := s.currentInteractiveState(fn)
 
 		flavor, err := plot.ParseGCodeFlavor(r.URL.Query().Get("flavor"))
 		if err != nil {
@@ -491,7 +546,7 @@ func (s *server) serveHTTP(l net.Listener) {
 		ctx, cancel := context.WithTimeout(r.Context(), buildTimeout)
 		defer cancel()
 
-		out, err := execute(ctx, s.tmpdir, fn, s.customArgs, sketchArgs, optimiseLLO, optimiseVP, vpypeAvail, showDebug, "gcode", []string{"--gcode-flavor", string(flavor)}, func(line string) {
+		out, err := execute(ctx, s.tmpdir, fn, s.customArgs, sketchArgs, interactiveState, optimiseLLO, optimiseVP, vpypeAvail, showDebug, "gcode", []string{"--gcode-flavor", string(flavor)}, func(line string) {
 			log.WithField("sketch", sketchName).Debug(line)
 		})
 		if err != nil {
@@ -557,7 +612,7 @@ func (s *server) appendBuildLog(line string) {
 	s.broadcast(event{Type: "log", Log: line})
 }
 
-func execute(ctx context.Context, tmpdir, fn string, customArgs []string, sketchArgs map[string]string, optimiseLLO bool, optimiseVP bool, vpypeAvail bool, showDebug bool, forcedDevice string, extraArgs []string, onLog func(string)) (outFN string, err error) {
+func execute(ctx context.Context, tmpdir, fn string, customArgs []string, sketchArgs map[string]string, interactiveState json.RawMessage, optimiseLLO bool, optimiseVP bool, vpypeAvail bool, showDebug bool, forcedDevice string, extraArgs []string, onLog func(string)) (outFN string, err error) {
 	if onLog == nil {
 		onLog = func(string) {}
 	}
@@ -592,6 +647,12 @@ func execute(ctx context.Context, tmpdir, fn string, customArgs []string, sketch
 
 	var args []string
 	args = append(args, "run", base, "--output", outFN, "--device", device)
+	statePath, cleanupState, err := writeInteractiveStateFile(tmpdir, interactiveState)
+	if err != nil {
+		return "", err
+	}
+	defer cleanupState()
+	args = append(args, "--interactive-state", statePath)
 	if renderArgs.DeviceOptsExplicit && renderArgs.DeviceOpts != "" {
 		args = append(args, "--device-opts", renderArgs.DeviceOpts)
 		onLog("step: using device opts " + renderArgs.DeviceOpts)
