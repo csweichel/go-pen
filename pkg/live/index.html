@@ -7,8 +7,9 @@
       body { font-family: system-ui, sans-serif; background: #1a1a1a; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; }
       header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: #252525; border-bottom: 1px solid #333; }
       header h1 { font-size: 16px; font-weight: 600; white-space: nowrap; }
-      select { background: #333; color: #e0e0e0; border: 1px solid #555; border-radius: 4px; padding: 6px 12px; font-size: 14px; cursor: pointer; }
-      select:hover { border-color: #888; }
+      select, button { background: #333; color: #e0e0e0; border: 1px solid #555; border-radius: 4px; padding: 6px 12px; font-size: 14px; cursor: pointer; }
+      select:hover, button:hover { border-color: #888; }
+      button:disabled { cursor: not-allowed; opacity: 0.5; border-color: #555; }
       .controls { display: flex; align-items: center; gap: 12px; margin-left: auto; }
       .opt-group { display: flex; align-items: center; gap: 8px; }
       .opt-group label { font-size: 12px; color: #bbb; display: flex; align-items: center; gap: 4px; }
@@ -49,6 +50,12 @@
           <label><input type="checkbox" id="opt-llo"> llo</label>
           <label><input type="checkbox" id="opt-vpype"> vpype</label>
         </div>
+        <label for="gcode-flavor">gcode</label>
+        <select id="gcode-flavor">
+          <option value="vanilla">vanilla</option>
+          <option value="mk4s">mk4s</option>
+        </select>
+        <button type="button" id="download-gcode" disabled>download gcode</button>
         <span id="status" class="status-building">connecting…</span>
         <label>zoom</label>
         <input type="range" min="10" max="200" value="100" id="zoom"
@@ -70,11 +77,19 @@
       var optDebug = document.getElementById("opt-debug");
       var optLLO = document.getElementById("opt-llo");
       var optVPype = document.getElementById("opt-vpype");
+      var gcodeFlavorSelect = document.getElementById("gcode-flavor");
+      var downloadGCodeButton = document.getElementById("download-gcode");
       var galleryMode = false;
+      var currentEventType = "";
+      var exportingGCode = false;
 
       function setStatus(text, cls) {
         statusEl.textContent = text;
         statusEl.className = cls;
+      }
+
+      function syncDownloadButton() {
+        downloadGCodeButton.disabled = exportingGCode || currentEventType !== "ready";
       }
 
       function showImage(file) {
@@ -133,6 +148,7 @@
       }
 
       function handleEvent(ev) {
+        currentEventType = ev.type === "log" ? "building" : (ev.type || "");
         switch (ev.type) {
           case "ready":
             setStatus("ready", "status-ready");
@@ -155,6 +171,75 @@
             errorDiv.style.display = "block";
             break;
         }
+        syncDownloadButton();
+      }
+
+      function filenameFromDisposition(disposition) {
+        if (!disposition) return "";
+
+        var utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+        if (utf8Match && utf8Match[1]) {
+          try {
+            return decodeURIComponent(utf8Match[1]);
+          } catch (err) {
+            return utf8Match[1];
+          }
+        }
+
+        var plainMatch = disposition.match(/filename="?([^";]+)"?/i);
+        if (plainMatch && plainMatch[1]) {
+          return plainMatch[1];
+        }
+
+        return "";
+      }
+
+      function finishGCodeDownload(label) {
+        exportingGCode = false;
+        downloadGCodeButton.textContent = label;
+        syncDownloadButton();
+      }
+
+      function downloadGCode() {
+        if (exportingGCode) return;
+
+        exportingGCode = true;
+        var label = downloadGCodeButton.dataset.label || downloadGCodeButton.textContent;
+        downloadGCodeButton.dataset.label = label;
+        downloadGCodeButton.textContent = "exporting…";
+        syncDownloadButton();
+
+        var flavor = gcodeFlavorSelect.value || "vanilla";
+        fetch("/api/export/gcode?flavor=" + encodeURIComponent(flavor)).then(function(res) {
+          if (!res.ok) {
+            return res.text().then(function(text) {
+              throw new Error(text || "Export failed");
+            });
+          }
+
+          var disposition = res.headers.get("Content-Disposition") || "";
+          return res.blob().then(function(blob) {
+            return {
+              blob: blob,
+              filename: filenameFromDisposition(disposition) || "sketch.gcode"
+            };
+          });
+        }).then(function(result) {
+          var url = URL.createObjectURL(result.blob);
+          var link = document.createElement("a");
+          link.href = url;
+          link.download = result.filename;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          setTimeout(function() {
+            URL.revokeObjectURL(url);
+          }, 1000);
+        }).catch(function(err) {
+          window.alert("Failed to export G-code: " + err.message);
+        }).then(function() {
+          finishGCodeDownload(label);
+        });
       }
 
       // SSE: server pushes build state
@@ -164,7 +249,9 @@
           handleEvent(JSON.parse(msg.data));
         };
         es.onerror = function() {
+          currentEventType = "";
           setStatus("disconnected", "status-error");
+          syncDownloadButton();
         };
       }
 
@@ -197,6 +284,7 @@
       optDebug.addEventListener("change", updateDebug);
       optLLO.addEventListener("change", updateOptimisations);
       optVPype.addEventListener("change", updateOptimisations);
+      downloadGCodeButton.addEventListener("click", downloadGCode);
 
       // Boot: fetch initial state, start SSE, optionally trigger first build
       function boot() {
@@ -236,6 +324,7 @@
           setStatus("error", "status-error");
           errorDiv.textContent = "Failed to connect: " + err;
           errorDiv.style.display = "block";
+          syncDownloadButton();
         });
       }
 

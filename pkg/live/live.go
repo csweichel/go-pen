@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/csweichel/go-pen/pkg/plot"
 	"github.com/rjeczalik/notify"
 	log "github.com/sirupsen/logrus"
 )
@@ -224,7 +225,7 @@ func (s *server) build(fn string) {
 	showDebug := s.showDebug
 	s.mu.Unlock()
 
-	out, err := execute(ctx, s.tmpdir, fn, s.customArgs, optimiseLLO, optimiseVP, vpypeAvail, showDebug, s.appendBuildLog)
+	out, err := execute(ctx, s.tmpdir, fn, s.customArgs, optimiseLLO, optimiseVP, vpypeAvail, showDebug, "", nil, s.appendBuildLog)
 	cancel()
 	if err != nil {
 		msg := err.Error()
@@ -418,6 +419,68 @@ func (s *server) serveHTTP(l net.Listener) {
 		}{OK: true})
 	})
 
+	// Export the current sketch as G-code without replacing the preview asset.
+	mux.HandleFunc("/api/export/gcode", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		s.mu.Lock()
+		fn := s.currentMainFileLocked()
+		sketchName := s.currentSketchNameLocked()
+		optimiseLLO := s.optimiseLLO
+		optimiseVP := s.optimiseVP
+		vpypeAvail := s.vpypeAvail
+		showDebug := s.showDebug
+		s.mu.Unlock()
+
+		if fn == "" {
+			http.Error(w, "no sketch selected", http.StatusBadRequest)
+			return
+		}
+
+		flavor, err := plot.ParseGCodeFlavor(r.URL.Query().Get("flavor"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), buildTimeout)
+		defer cancel()
+
+		out, err := execute(ctx, s.tmpdir, fn, s.customArgs, optimiseLLO, optimiseVP, vpypeAvail, showDebug, "gcode", []string{"--gcode-flavor", string(flavor)}, func(line string) {
+			log.WithField("sketch", sketchName).Debug(line)
+		})
+		if err != nil {
+			msg := err.Error()
+			if ctx.Err() != nil {
+				msg = "gcode export timed out"
+			}
+			log.WithError(err).WithField("sketch", sketchName).Error("gcode export failed")
+			http.Error(w, msg, http.StatusInternalServerError)
+			return
+		}
+
+		f, err := os.Open(out)
+		if err != nil {
+			http.Error(w, "cannot open generated gcode", http.StatusInternalServerError)
+			return
+		}
+		defer f.Close()
+
+		info, err := f.Stat()
+		if err != nil {
+			http.Error(w, "cannot inspect generated gcode", http.StatusInternalServerError)
+			return
+		}
+
+		filename := downloadFilename(sketchName, "gcode")
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+		http.ServeContent(w, r, filename, info.ModTime(), f)
+	})
+
 	// Serve rendered output
 	mux.HandleFunc("/out/", func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
@@ -452,15 +515,30 @@ func (s *server) appendBuildLog(line string) {
 	s.broadcast(event{Type: "log", Log: line})
 }
 
-func execute(ctx context.Context, tmpdir, fn string, customArgs []string, optimiseLLO bool, optimiseVP bool, vpypeAvail bool, showDebug bool, onLog func(string)) (outFN string, err error) {
+func execute(ctx context.Context, tmpdir, fn string, customArgs []string, optimiseLLO bool, optimiseVP bool, vpypeAvail bool, showDebug bool, forcedDevice string, extraArgs []string, onLog func(string)) (outFN string, err error) {
+	if onLog == nil {
+		onLog = func(string) {}
+	}
+
 	onLog("step: resolving build settings")
-	device, deviceExplicit := parseDeviceArg(customArgs)
-	if !deviceExplicit {
+	renderArgs := splitManagedRenderArgs(customArgs)
+	device := renderArgs.Device
+	if forcedDevice != "" {
+		device = forcedDevice
+		onLog(fmt.Sprintf("step: overriding output device %q", forcedDevice))
+	}
+
+	if device == "" {
 		device = "svg"
 	}
+
+	deviceExplicit := renderArgs.DeviceExplicit || forcedDevice != ""
 	onLog(fmt.Sprintf("step: output device %q (explicit=%t)", device, deviceExplicit))
 	ext := outputExtForDevice(device)
-	outFN = filepath.Join(tmpdir, fmt.Sprintf("%d.%s", time.Now().UnixMilli(), ext))
+	outFN, err = newOutputPath(tmpdir, ext)
+	if err != nil {
+		return "", err
+	}
 	onLog("step: output path " + outFN)
 
 	var dir, base string
@@ -477,11 +555,12 @@ func execute(ctx context.Context, tmpdir, fn string, customArgs []string, optimi
 	onLog("step: entrypoint " + base)
 
 	var args []string
-	args = append(args, "run", base, "--output", outFN)
-	if !deviceExplicit {
-		args = append(args, "--device", device)
+	args = append(args, "run", base, "--output", outFN, "--device", device)
+	if renderArgs.DeviceOptsExplicit && renderArgs.DeviceOpts != "" {
+		args = append(args, "--device-opts", renderArgs.DeviceOpts)
+		onLog("step: using device opts " + renderArgs.DeviceOpts)
 	}
-	remainingArgs, passthroughOpts := stripManagedOptimiseFlags(customArgs, map[string]struct{}{
+	remainingArgs, passthroughOpts := stripManagedOptimiseFlags(renderArgs.RemainingArgs, map[string]struct{}{
 		"llo":   {},
 		"vpype": {},
 	})
@@ -492,8 +571,8 @@ func execute(ctx context.Context, tmpdir, fn string, customArgs []string, optimi
 		onLog("step: enabling optimisation llo (UI)")
 	}
 	if optimiseVP {
-		if device != "svg" {
-			onLog("step: vpype optimisation requested but device is not svg, skipping vpype")
+		if device != "svg" && device != "gcode" {
+			onLog("step: vpype optimisation requested but device does not support vpype, skipping vpype")
 		} else if !vpypeAvail {
 			onLog("step: vpype optimisation requested but vpype is unavailable, skipping vpype")
 		} else {
@@ -546,6 +625,9 @@ func execute(ctx context.Context, tmpdir, fn string, customArgs []string, optimi
 		onLog("step: enabling debug output (UI)")
 	}
 	args = append(args, filteredArgs...)
+	if len(extraArgs) > 0 {
+		args = append(args, extraArgs...)
+	}
 
 	log.WithField("outFN", outFN).WithField("args", args).Info("executing go-pen program")
 	onLog("step: executing command")
@@ -611,6 +693,56 @@ func (s *server) currentMainFileLocked() string {
 		return filepath.Join(s.galleryDir, s.current, "main.go")
 	}
 	return ""
+}
+
+func (s *server) currentSketchNameLocked() string {
+	if s.galleryDir != "" && s.current != "" {
+		return s.current
+	}
+	return sketchNameForMainFile(s.currentMainFileLocked())
+}
+
+type managedRenderArgs struct {
+	RemainingArgs      []string
+	Device             string
+	DeviceExplicit     bool
+	DeviceOpts         string
+	DeviceOptsExplicit bool
+}
+
+func splitManagedRenderArgs(args []string) (res managedRenderArgs) {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--device":
+			res.DeviceExplicit = true
+			if i+1 < len(args) {
+				res.Device = args[i+1]
+				i++
+			}
+		case strings.HasPrefix(a, "--device="):
+			res.DeviceExplicit = true
+			res.Device = strings.TrimPrefix(a, "--device=")
+		case a == "--device-opts":
+			res.DeviceOptsExplicit = true
+			if i+1 < len(args) {
+				res.DeviceOpts = args[i+1]
+				i++
+			}
+		case strings.HasPrefix(a, "--device-opts="):
+			res.DeviceOptsExplicit = true
+			res.DeviceOpts = strings.TrimPrefix(a, "--device-opts=")
+		case a == "--output" || a == "-o":
+			if i+1 < len(args) {
+				i++
+			}
+		case strings.HasPrefix(a, "--output="), strings.HasPrefix(a, "-o="):
+			// managed output flag, ignore
+		default:
+			res.RemainingArgs = append(res.RemainingArgs, a)
+		}
+	}
+	return res
 }
 
 func stripManagedOptimiseFlags(args []string, managed map[string]struct{}) (remainingArgs []string, passthroughOpts []string) {
@@ -681,22 +813,6 @@ func uniqueStrings(in []string) []string {
 	return res
 }
 
-func parseDeviceArg(args []string) (device string, explicit bool) {
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		if a == "--device" {
-			if i+1 < len(args) {
-				return args[i+1], true
-			}
-			return "", true
-		}
-		if strings.HasPrefix(a, "--device=") {
-			return strings.TrimPrefix(a, "--device="), true
-		}
-	}
-	return "", false
-}
-
 func outputExtForDevice(device string) string {
 	switch device {
 	case "svg":
@@ -710,6 +826,87 @@ func outputExtForDevice(device string) string {
 	default:
 		return "out"
 	}
+}
+
+func newOutputPath(tmpdir, ext string) (string, error) {
+	pattern := "go-pen-*"
+	if ext != "" {
+		pattern += "." + ext
+	}
+
+	f, err := os.CreateTemp(tmpdir, pattern)
+	if err != nil {
+		return "", err
+	}
+	name := f.Name()
+	if err := f.Close(); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+func sketchNameForMainFile(fn string) string {
+	if fn == "" {
+		return "sketch"
+	}
+
+	base := filepath.Base(filepath.Clean(fn))
+	if base == "." || base == string(filepath.Separator) {
+		return "sketch"
+	}
+	if strings.EqualFold(base, "main.go") {
+		parent := filepath.Base(filepath.Dir(filepath.Clean(fn)))
+		if parent != "" && parent != "." && parent != string(filepath.Separator) {
+			return parent
+		}
+	}
+
+	name := strings.TrimSuffix(base, filepath.Ext(base))
+	if name == "" {
+		return "sketch"
+	}
+	return name
+}
+
+func downloadFilename(name string, ext string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "sketch"
+	}
+
+	var b strings.Builder
+	b.Grow(len(name))
+
+	lastDash := false
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_':
+			b.WriteRune(r)
+			lastDash = false
+		case r == '-':
+			if b.Len() > 0 && !lastDash {
+				b.WriteRune(r)
+				lastDash = true
+			}
+		default:
+			if b.Len() > 0 && !lastDash {
+				b.WriteRune('-')
+				lastDash = true
+			}
+		}
+	}
+
+	base := strings.Trim(b.String(), "-_.")
+	if base == "" {
+		base = "sketch"
+	}
+	if ext == "" {
+		return base
+	}
+	if !strings.HasPrefix(ext, ".") {
+		ext = "." + ext
+	}
+	return base + ext
 }
 
 func hasVpype() bool {

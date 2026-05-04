@@ -182,6 +182,7 @@ func Run(p Canvas, d DrawFunc) {
 	var (
 		device       = pflag.String("device", "png", "Output device. Must be png, svg, gcode, or json")
 		deviceOptsFN = pflag.String("device-opts", "", "Path to the output device option file")
+		gcodeFlavor  = pflag.String("gcode-flavor", "", "G-code flavor override for --device gcode. Available: vanilla, mk4s")
 		output       = pflag.StringP("output", "o", "", "path to the output file")
 		args         = pflag.StringToString("args", nil, "args to pass to the drawing")
 		optimisation = pflag.StringSliceP("optimise", "L", nil, "Configures optimisations. Available optimisations are llo (linear line order), vpype (if installed, svg only)")
@@ -233,7 +234,7 @@ func Run(p Canvas, d DrawFunc) {
 	case "svg":
 		plot = NewSVGPlotter()
 	case "gcode":
-		plot, err = NewGCodePlotter(*deviceOptsFN)
+		plot, err = NewGCodePlotter(*deviceOptsFN, *gcodeFlavor)
 	case "json":
 		plot = JsonPlotter
 	default:
@@ -244,13 +245,18 @@ func Run(p Canvas, d DrawFunc) {
 	}
 
 	if useVpypeOptimisation {
-		if *device != "svg" {
-			log.WithField("device", *device).Warn("vpype optimisation is only supported for svg output, skipping")
-		} else {
+		switch *device {
+		case "svg":
 			err = PlotSVGWithVpype(out, p, drawing)
-			if err != nil {
-				log.WithError(err).Fatal("failed to plot drawing")
-			}
+		case "gcode":
+			err = PlotGCodeWithVpype(out, p, drawing, *deviceOptsFN, *gcodeFlavor)
+		default:
+			log.WithField("device", *device).Warn("vpype optimisation is only supported for svg and gcode output, skipping")
+		}
+		if err != nil {
+			log.WithError(err).Fatal("failed to plot drawing")
+		}
+		if *device == "svg" || *device == "gcode" {
 			return
 		}
 	}

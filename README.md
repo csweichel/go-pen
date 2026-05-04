@@ -34,6 +34,11 @@ go run example/field/main.go --help
 # generate gcode
 # Tip: inspecting the gcode is easy with https://icesl.loria.fr/webprinter/
 go run example/field/main.go --output field.gcode --device gcode --device-opts example/gcode-opts.json
+
+# generate Prusa-oriented gcode without editing the device opts JSON
+go run example/field/main.go --output field-mk4s.gcode --device gcode --gcode-flavor mk4s
 ```
 
-Notice the `--device-opts` flag which enables output device configuration. For gcode, [this struct](https://github.com/csweichel/go-pen/blob/b0b0b4c7825d7279268164536038f7da0e98de31/pkg/plot/gcode.go#L10-L15) defines the available options.
+Notice the `--device-opts` flag which enables output device configuration. For gcode, the `GCodeOpts` struct in `pkg/plot/gcode.go` defines the available options, including the optional `flavor` field. You can also override the JSON setting at runtime with `--gcode-flavor vanilla` or `--gcode-flavor mk4s`.
+
+If you also enable `--optimise vpype` with `--device gcode`, go-pen will try to route the export through vpype's `gwrite` command. This requires the `vpype-gcode` plug-in. If that plug-in is not installed, go-pen falls back to its native G-code generator.
