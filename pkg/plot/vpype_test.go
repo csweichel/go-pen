@@ -60,6 +60,30 @@ func TestVpypeGCodeArgsApplyTransformsAndPagesize(t *testing.T) {
 	}
 }
 
+func TestVpypeSVGGCodeArgsApplyTransforms(t *testing.T) {
+	opts := NewDefaultGCodeOpts()
+	opts.Scale = 0.25
+	opts.Offset = XY{X: 10, Y: 20}
+
+	got := vpypeSVGGCodeArgs("cfg.toml", "input.svg", "output.gcode", opts)
+
+	want := []string{
+		"-c", "cfg.toml",
+		"read", "input.svg",
+		"translate", "--", "10", "-20",
+		"scale", "-o", "0", "0", "0.25", "0.25",
+		"linemerge",
+		"linesimplify",
+		"reloop",
+		"linesort",
+		"gwrite", "--profile", "go_pen", "output.gcode",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected svg->gcode vpype args:\nwant: %#v\ngot:  %#v", want, got)
+	}
+}
+
 func TestPlotGCodeWithVpypeFallsBackWithoutGWrite(t *testing.T) {
 	origLookPath := execLookPath
 	origCommand := execCommand

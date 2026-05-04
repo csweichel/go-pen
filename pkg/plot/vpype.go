@@ -210,6 +210,84 @@ func PlotGCodeWithVpype(out io.Writer, p Canvas, d Drawing, optFN string, flavor
 	return writeFileToWriter(out, outFn)
 }
 
+// ConvertSVGToGCodeWithVpype converts an existing SVG file into G-code using
+// vpype's gwrite plug-in and the repo's G-code option schema.
+func ConvertSVGToGCodeWithVpype(out io.Writer, svgPath string, optFN string, flavorOverride string) error {
+	opts, err := LoadGCodeOpts(optFN, flavorOverride)
+	if err != nil {
+		return err
+	}
+	if svgPath == "" {
+		return fmt.Errorf("svg input path is required")
+	}
+	if !hasVpype() {
+		return fmt.Errorf("vpype binary not found in PATH")
+	}
+	if !hasVpypeGWrite() {
+		return fmt.Errorf("vpype-gcode plug-in not found; install vpype-gcode to convert svg files")
+	}
+	if opts.Scale <= 0 {
+		return fmt.Errorf("gcode scale must be > 0, got %g", opts.Scale)
+	}
+	if _, err := os.Stat(svgPath); err != nil {
+		return fmt.Errorf("cannot access svg input: %w", err)
+	}
+
+	fmt.Fprintln(os.Stdout, "[vpype] step: converting existing SVG to G-code")
+	tmpdir, err := os.MkdirTemp("", "go-pen-vpype-svg-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpdir)
+
+	configFn := filepath.Join(tmpdir, "vpype-gcode.toml")
+	outFn := filepath.Join(tmpdir, "output.gcode")
+
+	cfg, err := vpypeGCodeProfileConfig(opts)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(configFn, []byte(cfg), 0o644); err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stdout, "[vpype] step: vpype gwrite profile generated")
+
+	args := vpypeSVGGCodeArgs(configFn, svgPath, outFn, opts)
+	fmt.Fprintln(os.Stdout, "[vpype] command: vpype "+joinCommand(args))
+
+	cmd := execCommand("vpype", args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "[vpype] step: started vpype process (pid=%d)\n", cmd.Process.Pid)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go streamVpypeOutput(&wg, stdout, "[vpype stdout] ")
+	go streamVpypeOutput(&wg, stderr, "[vpype stderr] ")
+	err = cmd.Wait()
+	wg.Wait()
+	if err != nil {
+		return fmt.Errorf("vpype svg conversion failed: %w", err)
+	}
+	fmt.Fprintln(os.Stdout, "[vpype] step: vpype process completed successfully")
+
+	if _, err := os.Stat(outFn); err != nil {
+		return fmt.Errorf("vpype did not produce gcode output: %w", err)
+	}
+
+	fmt.Fprintln(os.Stdout, "[vpype] step: writing vpype-generated G-code")
+	return writeFileToWriter(out, outFn)
+}
+
 func vpypeGCodeArgs(configFn string, inFn string, outFn string, p Canvas, opts *GCodeOpts) []string {
 	scale := formatFloat(opts.Scale)
 	return []string{
@@ -224,6 +302,32 @@ func vpypeGCodeArgs(configFn string, inFn string, outFn string, p Canvas, opts *
 		"linesort",
 		"gwrite", "--profile", "go_pen", outFn,
 	}
+}
+
+func vpypeSVGGCodeArgs(configFn string, inFn string, outFn string, opts *GCodeOpts) []string {
+	scale := formatFloat(opts.Scale)
+	args := []string{
+		"-c", configFn,
+		"read", inFn,
+	}
+	if !opts.Offset.IsZero() {
+		args = append(args,
+			"translate", "--",
+			formatFloat(float64(opts.Offset.X)),
+			formatFloat(float64(-opts.Offset.Y)),
+		)
+	}
+	if opts.Scale != 1 {
+		args = append(args, "scale", "-o", "0", "0", scale, scale)
+	}
+	args = append(args,
+		"linemerge",
+		"linesimplify",
+		"reloop",
+		"linesort",
+		"gwrite", "--profile", "go_pen", outFn,
+	)
+	return args
 }
 
 func vpypePageSize(p Canvas, scale float64) string {
